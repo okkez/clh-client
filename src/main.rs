@@ -33,8 +33,16 @@ enum Commands {
         #[arg(long)]
         command: String,
     },
-    /// Print zsh integration script to stdout (eval with: eval "$(clh setup)")
-    Setup,
+    /// Print shell integration script to stdout
+    ///
+    /// zsh:  eval "$(clh setup)"
+    /// bash: eval "$(clh setup)"
+    /// fish: clh setup | source
+    Setup {
+        /// Shell to generate integration for (default: auto-detect from $SHELL)
+        #[arg(long, value_name = "SHELL")]
+        shell: Option<String>,
+    },
     /// Manage configuration
     Config {
         #[command(subcommand)]
@@ -79,8 +87,8 @@ fn main() -> Result<()> {
         }) => {
             add::run_add(&hostname, &pwd, &command)?;
         }
-        Some(Commands::Setup) => {
-            setup::print_setup();
+        Some(Commands::Setup { shell }) => {
+            setup::print_setup(shell.as_deref())?;
         }
         Some(Commands::Config { action }) => match action {
             ConfigAction::Show => config::Config::show()?,
