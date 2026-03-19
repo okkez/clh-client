@@ -45,8 +45,8 @@ impl Config {
                 path.display()
             );
         }
-        let content =
-            std::fs::read_to_string(&path).with_context(|| format!("Reading {}", path.display()))?;
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Reading {}", path.display()))?;
         toml::from_str(&content).with_context(|| format!("Parsing {}", path.display()))
     }
 

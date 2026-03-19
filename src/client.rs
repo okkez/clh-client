@@ -60,10 +60,9 @@ fn fetch_page(
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<History>, Option<usize>)> {
-    let mut req = client.get(base_url).query(&[
-        ("limit", limit.to_string()),
-        ("offset", offset.to_string()),
-    ]);
+    let mut req = client
+        .get(base_url)
+        .query(&[("limit", limit.to_string()), ("offset", offset.to_string())]);
 
     if let Some(ref hostname) = cfg.search.hostname {
         req = req.query(&[("hostname", hostname)]);
@@ -176,10 +175,8 @@ mod tests {
             history_json(2, "echo b"),
         ]))
         .unwrap();
-        let page2_body = serde_json::to_string(&serde_json::json!([
-            history_json(3, "echo c"),
-        ]))
-        .unwrap();
+        let page2_body =
+            serde_json::to_string(&serde_json::json!([history_json(3, "echo c"),])).unwrap();
 
         let mock1 = server
             .mock("GET", "/")

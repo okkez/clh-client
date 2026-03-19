@@ -10,7 +10,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "clh", about = "Fuzzy-search your command history via clh-server")]
+#[command(
+    name = "clh",
+    about = "Fuzzy-search your command history via clh-server"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
