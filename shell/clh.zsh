@@ -11,6 +11,8 @@ _clh_add_history() {
   # Skip empty commands and the clh command itself
   [[ -z "$last_cmd" ]] && return
   [[ "$last_cmd" == clh* ]] && return
+  # Skip commands prefixed with a space (intentionally hidden from history)
+  [[ "$last_cmd" == " "* ]] && return
   clh add --hostname="${HOST:-$(hostname)}" --pwd="$PWD" --command="$last_cmd" &!
 }
 add-zsh-hook precmd _clh_add_history
