@@ -1,3 +1,4 @@
+#![allow(clippy::multiple_crate_versions)]
 mod add;
 mod client;
 mod config;
@@ -47,7 +48,7 @@ enum ConfigAction {
     Show,
     /// Create a new config file interactively
     Init {
-        /// Server URL (e.g. https://clh.example.com)
+        /// Server URL (e.g. `<https://clh.example.com>`)
         #[arg(long)]
         url: String,
         /// Basic auth username

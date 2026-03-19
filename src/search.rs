@@ -8,7 +8,6 @@ use skim::prelude::*;
 use crate::client;
 use crate::config::Config;
 use crate::models::History;
-use chrono::Utc;
 
 /// A skim item wrapping a History record.
 struct HistoryItem {
@@ -128,7 +127,7 @@ fn dedup_and_sort(records: Vec<History>, dedup: bool) -> Vec<History> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
 
     fn make_history(id: i32, command: &str, updated_secs: i64) -> History {
         History {

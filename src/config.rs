@@ -66,7 +66,7 @@ impl Config {
         println!("Config path: {}", path.display());
         if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            println!("{}", content);
+            println!("{content}");
         } else {
             println!("(not found — run `clh config init` to create)");
         }
@@ -81,7 +81,7 @@ impl Config {
                 path.display()
             );
         }
-        let cfg = Config {
+        let cfg = Self {
             server: ServerConfig {
                 url: url.to_string(),
                 basic_auth_user: user.map(str::to_string),

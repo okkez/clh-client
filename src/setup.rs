@@ -45,5 +45,5 @@ bindkey '^T' _clh_search_all_widget
 "#;
 
 pub fn print_setup() {
-    print!("{}", ZSH_SCRIPT);
+    print!("{ZSH_SCRIPT}");
 }
