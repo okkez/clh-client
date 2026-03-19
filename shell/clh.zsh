@@ -15,8 +15,21 @@ _clh_add_history() {
 }
 add-zsh-hook precmd _clh_add_history
 
-# Ctrl+R: open clh fuzzy search and paste selected command into the prompt
-_clh_search_widget() {
+# Ctrl+S: fuzzy search filtered to the current directory
+_clh_search_pwd_widget() {
+  local selected
+  selected=$(clh search --pwd="$PWD" 2>/dev/tty)
+  local ret=$?
+  if [[ $ret -eq 0 && -n "$selected" ]]; then
+    LBUFFER="$selected"
+  fi
+  zle reset-prompt
+}
+zle -N _clh_search_pwd_widget
+bindkey '^S' _clh_search_pwd_widget
+
+# Ctrl+T: fuzzy search across all history
+_clh_search_all_widget() {
   local selected
   selected=$(clh search 2>/dev/tty)
   local ret=$?
@@ -25,5 +38,5 @@ _clh_search_widget() {
   fi
   zle reset-prompt
 }
-zle -N _clh_search_widget
-bindkey '^R' _clh_search_widget
+zle -N _clh_search_all_widget
+bindkey '^T' _clh_search_all_widget

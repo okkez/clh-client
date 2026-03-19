@@ -5,9 +5,9 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use skim::prelude::*;
 
+use crate::client;
 use crate::config::Config;
 use crate::models::History;
-use crate::{client, config};
 use chrono::Utc;
 
 /// A skim item wrapping a History record.
@@ -54,7 +54,16 @@ impl SkimItem for HistoryItem {
 /// Fetch all history records, deduplicate if configured, launch skim, and
 /// print the selected command to stdout.
 pub fn run_search(cfg: &Config) -> Result<()> {
-    let records = client::fetch_all(cfg)?;
+    run_search_inner(cfg, None)
+}
+
+/// Same as `run_search` but pre-filtered to the given working directory.
+pub fn run_search_with_pwd(cfg: &Config, pwd: &str) -> Result<()> {
+    run_search_inner(cfg, Some(pwd))
+}
+
+fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
+    let records = client::fetch_all(cfg, pwd)?;
     let items = dedup_and_sort(records, cfg.search.dedup);
 
     if items.is_empty() {
@@ -114,13 +123,6 @@ fn dedup_and_sort(records: Vec<History>, dedup: bool) -> Vec<History> {
     // Most recently used first
     deduped.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     deduped
-}
-
-#[allow(dead_code)]
-pub fn run_search_with_pwd(pwd: Option<&str>) -> Result<()> {
-    let cfg = config::Config::load()?;
-    let _ = pwd; // TODO: pass pwd filter through to client once server supports it
-    run_search(&cfg)
 }
 
 #[cfg(test)]

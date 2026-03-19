@@ -9,19 +9,21 @@ use crate::models::History;
 /// If the server returns an `X-Total-Count` header, records are fetched page by
 /// page until all are retrieved.  Otherwise a single request with a large limit
 /// is made (backwards-compatible with servers that do not support pagination).
-pub fn fetch_all(cfg: &Config) -> Result<Vec<History>> {
+///
+/// `pwd` optionally filters results to a specific working directory.
+pub fn fetch_all(cfg: &Config, pwd: Option<&str>) -> Result<Vec<History>> {
     let client = build_client(cfg)?;
     let base_url = cfg.server.url.trim_end_matches('/');
     let page_size = cfg.search.page_size;
 
     // First request: page 0
-    let (mut records, total) = fetch_page(&client, base_url, cfg, 0, page_size)?;
+    let (mut records, total) = fetch_page(&client, base_url, cfg, pwd, 0, page_size)?;
 
     if let Some(total) = total {
         // Server supports pagination — fetch remaining pages
         let mut offset = page_size;
         while offset < total {
-            let (page, _) = fetch_page(&client, base_url, cfg, offset, page_size)?;
+            let (page, _) = fetch_page(&client, base_url, cfg, pwd, offset, page_size)?;
             records.extend(page);
             offset += page_size;
         }
@@ -54,6 +56,7 @@ fn fetch_page(
     client: &Client,
     base_url: &str,
     cfg: &Config,
+    pwd: Option<&str>,
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<History>, Option<usize>)> {
@@ -64,6 +67,10 @@ fn fetch_page(
 
     if let Some(ref hostname) = cfg.search.hostname {
         req = req.query(&[("hostname", hostname)]);
+    }
+
+    if let Some(pwd) = pwd {
+        req = req.query(&[("pwd", pwd)]);
     }
 
     req = apply_auth(req, cfg);
@@ -153,7 +160,7 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let records = fetch_all(&cfg).unwrap();
+        let records = fetch_all(&cfg, None).unwrap();
 
         mock.assert();
         assert_eq!(records.len(), 2);
@@ -199,7 +206,7 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let records = fetch_all(&cfg).unwrap();
+        let records = fetch_all(&cfg, None).unwrap();
 
         mock1.assert();
         mock2.assert();
@@ -218,7 +225,7 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let result = fetch_all(&cfg);
+        let result = fetch_all(&cfg, None);
 
         mock.assert();
         assert!(result.is_err());

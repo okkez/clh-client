@@ -18,7 +18,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Fuzzy-search history and print selected command to stdout (default)
-    Search,
+    Search {
+        /// Filter results to this working directory
+        #[arg(long)]
+        pwd: Option<String>,
+    },
     /// Record a command to the server (called from zsh precmd hook)
     Add {
         #[arg(long)]
@@ -59,9 +63,13 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None | Some(Commands::Search) => {
+        None | Some(Commands::Search { pwd: None }) => {
             let cfg = config::Config::load()?;
             search::run_search(&cfg)?;
+        }
+        Some(Commands::Search { pwd: Some(pwd) }) => {
+            let cfg = config::Config::load()?;
+            search::run_search_with_pwd(&cfg, &pwd)?;
         }
         Some(Commands::Add {
             hostname,
