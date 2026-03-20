@@ -32,6 +32,17 @@ pub fn fetch_all(cfg: &Config, pwd: Option<&str>) -> Result<Vec<History>> {
     Ok(records)
 }
 
+/// Delete a history record by ID.
+pub fn delete_history(cfg: &Config, id: i32) -> Result<()> {
+    let client = build_client(cfg)?;
+    let base_url = cfg.server.url.trim_end_matches('/');
+    let url = format!("{base_url}/{id}");
+
+    let req = apply_auth(client.delete(&url), cfg);
+    req.send()?.error_for_status()?;
+    Ok(())
+}
+
 /// Post a new history record to the server.
 pub fn post_history(cfg: &Config, hostname: &str, pwd: &str, command: &str) -> Result<()> {
     let client = build_client(cfg)?;

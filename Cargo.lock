@@ -382,6 +382,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "crossterm",
  "dirs",
  "mockito",
  "regex",

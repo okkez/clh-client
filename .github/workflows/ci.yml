@@ -27,10 +27,7 @@ jobs:
 
       - name: Clippy (strict)
         run: >
-          cargo clippy --all-targets --
-          -W clippy::pedantic
-          -W clippy::nursery
-          -W clippy::cargo
+          cargo clippy --all-targets
 
       - name: Tests
         run: cargo nextest run

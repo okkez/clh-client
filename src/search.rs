@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use skim::prelude::*;
 
 use crate::client;
@@ -50,6 +51,12 @@ impl SkimItem for HistoryItem {
     }
 }
 
+fn history_id(item: &Arc<dyn SkimItem>) -> Option<i32> {
+    item.as_any()
+        .downcast_ref::<HistoryItem>()
+        .map(|h| h.history.id)
+}
+
 /// Fetch all history records, deduplicate if configured, launch skim, and
 /// print the selected command to stdout.
 pub fn run_search(cfg: &Config) -> Result<()> {
@@ -62,42 +69,57 @@ pub fn run_search_with_pwd(cfg: &Config, pwd: &str) -> Result<()> {
 }
 
 fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
-    let records = client::fetch_all(cfg, pwd)?;
-    let items = dedup_and_sort(records, cfg.search.dedup);
+    let mut records = client::fetch_all(cfg, pwd)?;
 
-    if items.is_empty() {
-        anyhow::bail!("No history records found.");
-    }
+    loop {
+        let items = dedup_and_sort(records.clone(), cfg.search.dedup);
 
-    let options = SkimOptionsBuilder::default()
-        .height("40%")
-        .reverse(true)
-        // empty string enables preview window backed by SkimItem::preview()
-        .preview(String::new())
-        .multi(false)
-        .build()
-        .map_err(|e| anyhow!("{e}"))?;
+        if items.is_empty() {
+            anyhow::bail!("No history records found.");
+        }
 
-    let skim_items: Vec<Arc<dyn SkimItem>> = items
-        .into_iter()
-        .map(|h| Arc::new(HistoryItem::new(h)) as Arc<dyn SkimItem>)
-        .collect();
+        let options = SkimOptionsBuilder::default()
+            .height("40%")
+            .reverse(true)
+            // empty string enables preview window backed by SkimItem::preview()
+            .preview(String::new())
+            .multi(false)
+            .bind(vec!["ctrl-d:accept".to_string()])
+            .build()
+            .map_err(|e| anyhow!("{e}"))?;
 
-    let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-    tx.send(skim_items)?;
-    drop(tx);
+        let skim_items: Vec<Arc<dyn SkimItem>> = items
+            .into_iter()
+            .map(|h| Arc::new(HistoryItem::new(h)) as Arc<dyn SkimItem>)
+            .collect();
 
-    let output = Skim::run_with(options, Some(rx)).map_err(|e| anyhow!("{e}"))?;
+        let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
+        tx.send(skim_items)?;
+        drop(tx);
 
-    if output.is_abort {
+        let output = Skim::run_with(options, Some(rx)).map_err(|e| anyhow!("{e}"))?;
+
+        if output.is_abort {
+            return Ok(());
+        }
+
+        // Ctrl+D: delete selected record and continue loop
+        if output.final_key == KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL) {
+            if let Some(item) = output.selected_items.first()
+                && let Some(id) = history_id(&item.item)
+            {
+                client::delete_history(cfg, id)?;
+                records.retain(|r| r.id != id);
+            }
+            continue;
+        }
+
+        // Enter: print selected command
+        for item in &output.selected_items {
+            print!("{}", item.item.output());
+        }
         return Ok(());
     }
-
-    for item in &output.selected_items {
-        print!("{}", item.item.output());
-    }
-
-    Ok(())
 }
 
 /// Dedup by command string, keeping the record with the latest `updated_at`.
