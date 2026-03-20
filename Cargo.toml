@@ -1,5 +1,5 @@
 [package]
-name = "clh"
+name = "clh-client"
 version = "0.1.0"
 edition = "2024"
 description = "CLI client for clh-server — fuzzy search your command history"
@@ -7,6 +7,19 @@ license = "MIT"
 repository = "https://github.com/okkez/clh-client"
 keywords = ["cli", "history", "fuzzy", "shell"]
 categories = ["command-line-utilities"]
+
+[[bin]]
+name = "clh"
+path = "src/main.rs"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/clh-v{ version }-{ target }.tar.gz"
+bin-dir = "clh{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/clh-v{ version }-{ target }.zip"
+pkg-fmt = "zip"
 
 [profile.release]
 strip = true
