@@ -55,6 +55,10 @@ basic_auth_password = "yourpassword"
 # hostname = "my-machine"  # filter to one host (optional)
 page_size = 1000
 dedup = true
+
+[add]
+# Regular expressions — matching commands are not recorded (optional)
+# ignore_patterns = ["^ls", "^cd ", "^pwd$", "^secret"]
 ```
 
 ### 2. Add zsh integration

@@ -384,6 +384,7 @@ dependencies = [
  "clap",
  "dirs",
  "mockito",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
