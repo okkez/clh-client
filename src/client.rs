@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reqwest::blocking::Client;
 
-use crate::config::{AddConfig, Config};
+use crate::config::Config;
 use crate::models::History;
 
 /// Fetch all history records from the server, handling pagination automatically.
@@ -109,7 +109,7 @@ fn apply_auth(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{SearchConfig, ServerConfig};
+    use crate::config::{AddConfig, SearchConfig, ServerConfig};
     use mockito::Server;
 
     fn make_config(url: &str) -> Config {
