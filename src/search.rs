@@ -52,7 +52,8 @@ impl SkimItem for HistoryItem {
 }
 
 fn history_id(item: &Arc<dyn SkimItem>) -> Option<i32> {
-    item.as_any()
+    (**item)
+        .as_any()
         .downcast_ref::<HistoryItem>()
         .map(|h| h.history.id)
 }
