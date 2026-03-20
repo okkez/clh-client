@@ -41,7 +41,12 @@ skim = "4"
 toml = "1"
 crossterm = "0.29"
 
+[lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
 
 [dev-dependencies]
 mockito = "1"
 tempfile = "3"
+
