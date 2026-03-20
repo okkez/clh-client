@@ -38,19 +38,11 @@ impl Default for SearchConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct AddConfig {
     /// Regular expression patterns — commands matching any pattern are not recorded
     #[serde(default)]
     pub ignore_patterns: Vec<String>,
-}
-
-impl Default for AddConfig {
-    fn default() -> Self {
-        Self {
-            ignore_patterns: Vec::new(),
-        }
-    }
 }
 
 impl Config {

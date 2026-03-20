@@ -163,6 +163,7 @@ mod tests {
         let records = fetch_all(&cfg, None).unwrap();
 
         mock.assert();
+        drop(server);
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].command, "echo a");
     }
@@ -208,6 +209,7 @@ mod tests {
 
         mock1.assert();
         mock2.assert();
+        drop(server);
         assert_eq!(records.len(), 3);
         assert_eq!(records[2].command, "echo c");
     }
@@ -226,6 +228,7 @@ mod tests {
         let result = fetch_all(&cfg, None);
 
         mock.assert();
+        drop(server);
         assert!(result.is_err());
     }
 }

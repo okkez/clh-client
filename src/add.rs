@@ -43,10 +43,10 @@ mod tests {
 
     fn should_ignore(cfg: &config::Config, command: &str) -> bool {
         for pattern in &cfg.add.ignore_patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if re.is_match(command) {
-                    return true;
-                }
+            if let Ok(re) = regex::Regex::new(pattern)
+                && re.is_match(command)
+            {
+                return true;
             }
         }
         false
