@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reqwest::blocking::Client;
 
-use crate::config::Config;
+use crate::config::{AddConfig, Config};
 use crate::models::History;
 
 /// Fetch all history records from the server, handling pagination automatically.
@@ -124,6 +124,7 @@ mod tests {
                 page_size: 2,
                 dedup: true,
             },
+            add: AddConfig::default(),
         }
     }
 

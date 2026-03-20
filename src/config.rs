@@ -7,6 +7,8 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub search: SearchConfig,
+    #[serde(default)]
+    pub add: AddConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -32,6 +34,21 @@ impl Default for SearchConfig {
             hostname: None,
             page_size: 1000,
             dedup: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AddConfig {
+    /// Regular expression patterns — commands matching any pattern are not recorded
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+}
+
+impl Default for AddConfig {
+    fn default() -> Self {
+        Self {
+            ignore_patterns: Vec::new(),
         }
     }
 }
@@ -88,6 +105,7 @@ impl Config {
                 basic_auth_password: password.map(str::to_string),
             },
             search: SearchConfig::default(),
+            add: AddConfig::default(),
         };
         cfg.save()?;
         println!("Created config at {}", path.display());
@@ -163,6 +181,7 @@ url = "http://localhost:8088"
                 page_size: 250,
                 dedup: true,
             },
+            add: AddConfig::default(),
         };
 
         let content = toml::to_string_pretty(&cfg).unwrap();
@@ -171,5 +190,24 @@ url = "http://localhost:8088"
         let loaded: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(loaded.server.url, "https://clh.test");
         assert_eq!(loaded.search.page_size, 250);
+    }
+
+    #[test]
+    fn parse_add_ignore_patterns() {
+        let toml = r#"
+[server]
+url = "http://localhost"
+
+[add]
+ignore_patterns = ["^ls", "^cd ", "^pwd$"]
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.add.ignore_patterns, vec!["^ls", "^cd ", "^pwd$"]);
+    }
+
+    #[test]
+    fn add_config_defaults_to_empty() {
+        let cfg: Config = toml::from_str(minimal_config_toml()).unwrap();
+        assert!(cfg.add.ignore_patterns.is_empty());
     }
 }
