@@ -2,14 +2,15 @@
 
 CLI client for [clh-server](https://github.com/okkez/clh-server) — fuzzy-search your shell command history across machines.
 
-Uses [skim](https://github.com/skim-rs/skim) as the fuzzy finder to interactively filter records stored in clh-server, replacing the default `Ctrl+R` with a server-backed, multi-host history search.
+Uses [skim](https://github.com/skim-rs/skim) as the fuzzy finder to interactively filter records stored in clh-server.
 
 ## Features
 
 - **Fuzzy search** — powered by skim (fzf-compatible TUI)
 - **Auto dedup** — same command appears only once (most recently used wins)
+- **Streaming display** — skim opens immediately while records are still being fetched
 - **Auto pagination** — fetches all records transparently (supports `X-Total-Count` from server)
-- **zsh integration** — auto-record every command and bind `Ctrl+R` to search
+- **zsh / bash / fish integration** — auto-record every command and bind `Ctrl+S` / `Ctrl+T` to search
 - **Basic auth** — compatible with Nginx-protected clh-server instances
 
 ## Requirements
@@ -54,33 +55,46 @@ basic_auth_password = "yourpassword"
 [search]
 # hostname = "my-machine"  # filter to one host (optional)
 page_size = 1000
-dedup = true
 
 [add]
 # Regular expressions — matching commands are not recorded (optional)
 # ignore_patterns = ["^ls", "^cd ", "^pwd$", "^secret"]
 ```
 
-### 2. Add zsh integration
+### 2. Add shell integration
 
-Add the following to your `~/.zshrc`:
+**zsh** — add to `~/.zshrc`:
 
 ```zsh
 eval "$(clh setup)"
 ```
 
+**bash** — add to `~/.bashrc`:
+
+```bash
+eval "$(clh setup)"
+```
+
+**fish** — add to `~/.config/fish/config.fish`:
+
+```fish
+clh setup | source
+```
+
 This sets up:
 - **Auto-recording**: every command you run is silently POSTed to clh-server in the background
-- **Ctrl+R binding**: opens skim fuzzy search; the selected command is pasted into your prompt (not executed immediately)
+- **Ctrl+S binding**: fuzzy search filtered to the **current directory** — the selected command is pasted into your prompt
+- **Ctrl+T binding**: fuzzy search across **all history** — the selected command is pasted into your prompt
 
 ## Usage
 
 | Command | Description |
 |---------|-------------|
 | `clh` | Fuzzy search history (same as `clh search`) |
-| `clh search` | Fuzzy search history |
-| `clh add --hostname H --pwd P --command C` | Record a command (called by zsh hook automatically) |
-| `clh setup` | Print zsh integration script |
+| `clh search` | Fuzzy search all history |
+| `clh search --pwd PATH` | Fuzzy search filtered to a specific directory |
+| `clh add --hostname H --pwd P --command C` | Record a command (called by shell hook automatically) |
+| `clh setup [--shell zsh\|bash\|fish]` | Print shell integration script |
 | `clh config show` | Show current config path and contents |
 | `clh config init --url URL [--user U --password P]` | Create initial config |
 
@@ -88,10 +102,15 @@ This sets up:
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Accept — pastes command into prompt |
+| `Enter` | Accept — pastes selected command into prompt |
 | `Esc` / `Ctrl+C` | Cancel |
+| `Ctrl+D` | Delete the selected record from the server, then continue searching |
 | `Ctrl+P` / `↑` | Move up |
 | `Ctrl+N` / `↓` | Move down |
+
+> **Note on `Ctrl+D` deletion:**
+> - In directory search (`Ctrl+S`): deletes **all** server records with that command name (scoped to the current directory's records).
+> - In global search (`Ctrl+T`): deletes **only the single displayed record** to avoid accidentally removing history used in other directories.
 
 ## Server-side pagination
 
