@@ -80,16 +80,6 @@ fn build_skim_options() -> Result<SkimOptions> {
 }
 
 /// Deduplicate records by command, keeping the first occurrence (server returns newest first).
-/// Returns items ready to send to skim.
-fn make_deduped_items(records: &[History]) -> Vec<Arc<dyn SkimItem>> {
-    let mut seen: HashSet<String> = HashSet::new();
-    records
-        .iter()
-        .filter(|r| seen.insert(r.command.clone()))
-        .map(|h| Arc::new(HistoryItem::new(h.clone())) as Arc<dyn SkimItem>)
-        .collect()
-}
-
 /// Delete all server records that share `command`, then remove them from `records`.
 /// Used in pwd-scoped mode (^S) where all duplicates in the current directory should go.
 fn delete_by_command(cfg: &Config, command: &str, records: &mut Vec<History>) -> Result<()> {
@@ -262,11 +252,21 @@ mod tests {
         }
     }
 
-    /// Convenience: extract command strings from make_deduped_items output.
+    /// Deduplicate `records` by command (first occurrence wins) and return skim items.
+    fn make_deduped_items(records: &[History]) -> Vec<Arc<dyn SkimItem>> {
+        let mut seen: HashSet<String> = HashSet::new();
+        records
+            .iter()
+            .filter(|r| seen.insert(r.command.clone()))
+            .map(|h| Arc::new(HistoryItem::new(h.clone())) as Arc<dyn SkimItem>)
+            .collect()
+    }
+
+    /// Convenience: extract command strings from `make_deduped_items` output.
     fn commands(records: &[History]) -> Vec<String> {
         make_deduped_items(records)
             .iter()
-            .filter_map(|item| history_command(item))
+            .filter_map(history_command)
             .collect()
     }
 
