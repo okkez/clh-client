@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -11,6 +10,7 @@ permissions:
 jobs:
   upload-assets:
     name: Upload assets (${{ matrix.target }})
+    if: github.repository_owner == 'okkez'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
