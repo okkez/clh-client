@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
@@ -11,21 +11,21 @@ pub struct Config {
     pub add: AddConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub url: String,
     pub basic_auth_user: Option<String>,
     pub basic_auth_password: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchConfig {
     /// If set, filter results to this hostname only
     pub hostname: Option<String>,
     /// Number of records to fetch per page
     pub page_size: usize,
-    /// Deduplicate by command string (keep most recently used)
-    pub dedup: bool,
+    /// Height of the skim fuzzy finder (e.g. "40%", "20", "30%")
+    pub height: String,
 }
 
 impl Default for SearchConfig {
@@ -33,12 +33,12 @@ impl Default for SearchConfig {
         Self {
             hostname: None,
             page_size: 1000,
-            dedup: true,
+            height: "40%".to_string(),
         }
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AddConfig {
     /// Regular expression patterns — commands matching any pattern are not recorded
     #[serde(default)]
@@ -124,7 +124,7 @@ basic_auth_password = "pass"
 [search]
 hostname = "my-machine"
 page_size = 500
-dedup = false
+height = "60%"
 "#
     }
 
@@ -143,7 +143,7 @@ url = "http://localhost:8088"
         assert_eq!(cfg.server.basic_auth_password.as_deref(), Some("pass"));
         assert_eq!(cfg.search.hostname.as_deref(), Some("my-machine"));
         assert_eq!(cfg.search.page_size, 500);
-        assert!(!cfg.search.dedup);
+        assert_eq!(cfg.search.height, "60%");
     }
 
     #[test]
@@ -154,7 +154,7 @@ url = "http://localhost:8088"
         assert!(cfg.server.basic_auth_password.is_none());
         assert!(cfg.search.hostname.is_none());
         assert_eq!(cfg.search.page_size, 1000);
-        assert!(cfg.search.dedup);
+        assert_eq!(cfg.search.height, "40%");
     }
 
     #[test]
@@ -171,7 +171,7 @@ url = "http://localhost:8088"
             search: SearchConfig {
                 hostname: None,
                 page_size: 250,
-                dedup: true,
+                height: "40%".to_string(),
             },
             add: AddConfig::default(),
         };

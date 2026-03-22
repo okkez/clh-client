@@ -6,30 +6,45 @@ use crate::models::History;
 
 /// Fetch all history records from the server, handling pagination automatically.
 ///
-/// If the server returns an `X-Total-Count` header, records are fetched page by
-/// page until all are retrieved.  Otherwise a single request with a large limit
-/// is made (backwards-compatible with servers that do not support pagination).
+/// Calls `on_page` with each page of results as they are fetched.
+/// If `on_page` returns an error, fetching stops and the error is returned.
 ///
 /// `pwd` optionally filters results to a specific working directory.
-pub fn fetch_all(cfg: &Config, pwd: Option<&str>) -> Result<Vec<History>> {
+pub fn for_each_page<F>(cfg: &Config, pwd: Option<&str>, mut on_page: F) -> Result<()>
+where
+    F: FnMut(Vec<History>) -> Result<()>,
+{
     let client = build_client(cfg)?;
     let base_url = cfg.server.url.trim_end_matches('/');
     let page_size = cfg.search.page_size;
 
-    // First request: page 0
-    let (mut records, total) = fetch_page(&client, base_url, cfg, pwd, 0, page_size)?;
+    let (first_page, total) = fetch_page(&client, base_url, cfg, pwd, 0, page_size)?;
+    on_page(first_page)?;
 
     if let Some(total) = total {
-        // Server supports pagination — fetch remaining pages
         let mut offset = page_size;
         while offset < total {
             let (page, _) = fetch_page(&client, base_url, cfg, pwd, offset, page_size)?;
-            records.extend(page);
+            on_page(page)?;
             offset += page_size;
         }
     }
 
-    Ok(records)
+    Ok(())
+}
+
+/// Fetch all history records from the server into a `Vec`.
+///
+/// Convenience wrapper around [`for_each_page`]. Used in tests and as a utility
+/// for callers that need the full record list before processing.
+#[allow(dead_code)]
+pub fn fetch_all(cfg: &Config, pwd: Option<&str>) -> Result<Vec<History>> {
+    let mut all = Vec::new();
+    for_each_page(cfg, pwd, |page| {
+        all.extend(page);
+        Ok(())
+    })?;
+    Ok(all)
 }
 
 /// Delete a history record by ID.
@@ -133,7 +148,7 @@ mod tests {
             search: SearchConfig {
                 hostname: None,
                 page_size: 2,
-                dedup: true,
+                height: "40%".to_string(),
             },
             add: AddConfig::default(),
         }
