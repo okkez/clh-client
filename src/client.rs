@@ -148,6 +148,7 @@ mod tests {
             search: SearchConfig {
                 hostname: None,
                 page_size: 2,
+                height: "40%".to_string(),
             },
             add: AddConfig::default(),
         }

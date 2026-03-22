@@ -24,6 +24,8 @@ pub struct SearchConfig {
     pub hostname: Option<String>,
     /// Number of records to fetch per page
     pub page_size: usize,
+    /// Height of the skim fuzzy finder (e.g. "40%", "20", "30%")
+    pub height: String,
 }
 
 impl Default for SearchConfig {
@@ -31,6 +33,7 @@ impl Default for SearchConfig {
         Self {
             hostname: None,
             page_size: 1000,
+            height: "40%".to_string(),
         }
     }
 }
@@ -121,6 +124,7 @@ basic_auth_password = "pass"
 [search]
 hostname = "my-machine"
 page_size = 500
+height = "60%"
 "#
     }
 
@@ -139,6 +143,7 @@ url = "http://localhost:8088"
         assert_eq!(cfg.server.basic_auth_password.as_deref(), Some("pass"));
         assert_eq!(cfg.search.hostname.as_deref(), Some("my-machine"));
         assert_eq!(cfg.search.page_size, 500);
+        assert_eq!(cfg.search.height, "60%");
     }
 
     #[test]
@@ -149,6 +154,7 @@ url = "http://localhost:8088"
         assert!(cfg.server.basic_auth_password.is_none());
         assert!(cfg.search.hostname.is_none());
         assert_eq!(cfg.search.page_size, 1000);
+        assert_eq!(cfg.search.height, "40%");
     }
 
     #[test]
@@ -165,6 +171,7 @@ url = "http://localhost:8088"
             search: SearchConfig {
                 hostname: None,
                 page_size: 250,
+                height: "40%".to_string(),
             },
             add: AddConfig::default(),
         };

@@ -55,6 +55,7 @@ basic_auth_password = "yourpassword"
 [search]
 # hostname = "my-machine"  # filter to one host (optional)
 page_size = 1000
+# height = "40%"           # skim window height: percentage or number of lines (default: "40%")
 
 [add]
 # Regular expressions — matching commands are not recorded (optional)

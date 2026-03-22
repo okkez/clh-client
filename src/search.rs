@@ -67,9 +67,9 @@ fn history_command(item: &Arc<dyn SkimItem>) -> Option<String> {
 }
 
 /// Build skim options. Ctrl+D is always bound to accept.
-fn build_skim_options() -> Result<SkimOptions> {
+fn build_skim_options(height: &str) -> Result<SkimOptions> {
     SkimOptionsBuilder::default()
-        .height("40%")
+        .height(height.to_string())
         .reverse(true)
         // empty string enables preview window backed by SkimItem::preview()
         .preview(String::new())
@@ -159,7 +159,7 @@ fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
     let collected = spawn_stream_thread(cfg.clone(), pwd.map(str::to_string), tx);
 
-    let output = Skim::run_with(build_skim_options()?, Some(rx))
+    let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
         .map_err(|e| anyhow!("{e}"))?;
 
     // Fast path: abort or Enter — return immediately without waiting for the stream thread.
@@ -205,7 +205,7 @@ fn post_delete_loop(cfg: &Config, pwd: Option<&str>) -> Result<()> {
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
         let collected = spawn_stream_thread(cfg.clone(), pwd.map(str::to_string), tx);
 
-        let output = Skim::run_with(build_skim_options()?, Some(rx))
+        let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
             .map_err(|e| anyhow!("{e}"))?;
 
         if output.is_abort {
@@ -288,10 +288,7 @@ mod tests {
             .find(|i| history_command(i).as_deref() == Some("git status"))
             .unwrap();
         // Should keep id=2 (the first record in the slice = most recently used)
-        let hist = (**git_item)
-            .as_any()
-            .downcast_ref::<HistoryItem>()
-            .unwrap();
+        let hist = (**git_item).as_any().downcast_ref::<HistoryItem>().unwrap();
         assert_eq!(hist.history.id, 2);
     }
 
