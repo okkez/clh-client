@@ -1,6 +1,7 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::thread;
 
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -51,100 +52,161 @@ impl SkimItem for HistoryItem {
     }
 }
 
-fn history_id(item: &Arc<dyn SkimItem>) -> Option<i32> {
+fn history_command(item: &Arc<dyn SkimItem>) -> Option<String> {
     (**item)
         .as_any()
         .downcast_ref::<HistoryItem>()
-        .map(|h| h.history.id)
+        .map(|h| h.history.command.clone())
 }
 
-/// Fetch all history records, deduplicate if configured, launch skim, and
-/// print the selected command to stdout.
+/// Build skim options. Ctrl+D is only bound (as accept) when `allow_delete` is true.
+fn build_skim_options(allow_delete: bool) -> Result<SkimOptions> {
+    let bindings: Vec<String> = if allow_delete {
+        vec!["ctrl-d:accept".to_string()]
+    } else {
+        vec![]
+    };
+    SkimOptionsBuilder::default()
+        .height("40%")
+        .reverse(true)
+        // empty string enables preview window backed by SkimItem::preview()
+        .preview(String::new())
+        .multi(false)
+        .bind(bindings)
+        .build()
+        .map_err(|e| anyhow!("{e}"))
+}
+
+/// Deduplicate records by command, keeping the first occurrence (server returns newest first).
+/// Returns items ready to send to skim.
+fn make_deduped_items(records: &[History]) -> Vec<Arc<dyn SkimItem>> {
+    let mut seen: HashSet<String> = HashSet::new();
+    records
+        .iter()
+        .filter(|r| seen.insert(r.command.clone()))
+        .map(|h| Arc::new(HistoryItem::new(h.clone())) as Arc<dyn SkimItem>)
+        .collect()
+}
+
+/// Delete all server records that share `command`, then remove them from `all_records`.
+fn delete_by_command(cfg: &Config, command: &str, all_records: &mut Vec<History>) -> Result<()> {
+    let ids: Vec<i32> = all_records
+        .iter()
+        .filter(|r| r.command == command)
+        .map(|r| r.id)
+        .collect();
+    for id in ids {
+        client::delete_history(cfg, id)?;
+    }
+    all_records.retain(|r| r.command != command);
+    Ok(())
+}
+
+/// Fetch all history records, deduplicate, launch skim, and print the selected command.
 pub fn run_search(cfg: &Config) -> Result<()> {
-    run_search_inner(cfg, None)
+    run_search_inner(cfg, None, false)
 }
 
 /// Same as `run_search` but pre-filtered to the given working directory.
+/// Ctrl+D deletion is enabled in this mode.
 pub fn run_search_with_pwd(cfg: &Config, pwd: &str) -> Result<()> {
-    run_search_inner(cfg, Some(pwd))
+    run_search_inner(cfg, Some(pwd), true)
 }
 
-fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
-    let mut records = client::fetch_all(cfg, pwd)?;
+fn run_search_inner(cfg: &Config, pwd: Option<&str>, allow_delete: bool) -> Result<()> {
+    // --- First display: stream records from server so skim opens immediately ---
+    let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
 
-    loop {
-        let items = dedup_and_sort(records.clone(), cfg.search.dedup);
+    let cfg_clone = cfg.clone();
+    let pwd_owned = pwd.map(str::to_string);
 
-        if items.is_empty() {
-            anyhow::bail!("No history records found.");
-        }
+    // Background thread: fetch pages and stream items to skim.
+    // Also collects all records for potential delete-loop re-use.
+    let stream_handle: thread::JoinHandle<Result<Vec<History>>> = thread::spawn(move || {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut collected: Vec<History> = Vec::new();
 
-        let options = SkimOptionsBuilder::default()
-            .height("40%")
-            .reverse(true)
-            // empty string enables preview window backed by SkimItem::preview()
-            .preview(String::new())
-            .multi(false)
-            .bind(vec!["ctrl-d:accept".to_string()])
-            .build()
-            .map_err(|e| anyhow!("{e}"))?;
-
-        let skim_items: Vec<Arc<dyn SkimItem>> = items
-            .into_iter()
-            .map(|h| Arc::new(HistoryItem::new(h)) as Arc<dyn SkimItem>)
-            .collect();
-
-        let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-        tx.send(skim_items)?;
-        drop(tx);
-
-        let output = Skim::run_with(options, Some(rx)).map_err(|e| anyhow!("{e}"))?;
-
-        if output.is_abort {
-            return Ok(());
-        }
-
-        // Ctrl+D: delete selected record and continue loop
-        if output.final_key == KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL) {
-            if let Some(item) = output.selected_items.first()
-                && let Some(id) = history_id(&item.item)
-            {
-                client::delete_history(cfg, id)?;
-                records.retain(|r| r.id != id);
+        client::for_each_page(&cfg_clone, pwd_owned.as_deref(), |page| {
+            collected.extend(page.iter().cloned());
+            let batch: Vec<Arc<dyn SkimItem>> = page
+                .into_iter()
+                .filter(|r| seen.insert(r.command.clone()))
+                .map(|h| Arc::new(HistoryItem::new(h)) as Arc<dyn SkimItem>)
+                .collect();
+            if !batch.is_empty() {
+                // Ignore send errors: skim may have closed (user aborted early)
+                let _ = tx.send(batch);
             }
-            continue;
-        }
+            Ok(())
+        })?;
+        Ok(collected)
+    });
 
-        // Enter: print selected command
+    let output = Skim::run_with(build_skim_options(allow_delete)?, Some(rx))
+        .map_err(|e| anyhow!("{e}"))?;
+
+    // Wait for background thread to finish (collects all records for delete loop)
+    let mut all_records = stream_handle
+        .join()
+        .map_err(|_| anyhow!("stream thread panicked"))??;
+
+    if all_records.is_empty() {
+        anyhow::bail!("No history records found.");
+    }
+
+    if output.is_abort {
+        return Ok(());
+    }
+
+    if allow_delete
+        && output.final_key == KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)
+    {
+        if let Some(command) = output.selected_items.first().and_then(|i| history_command(&i.item))
+        {
+            delete_by_command(cfg, &command, &mut all_records)?;
+        }
+        // fall through to post-delete loop
+    } else {
         for item in &output.selected_items {
             print!("{}", item.item.output());
         }
         return Ok(());
     }
-}
 
-/// Dedup by command string, keeping the record with the latest `updated_at`.
-fn dedup_and_sort(records: Vec<History>, dedup: bool) -> Vec<History> {
-    if !dedup {
-        return records;
+    // --- Post-delete loop: use in-memory records (no re-fetch needed) ---
+    loop {
+        let items = make_deduped_items(&all_records);
+        if items.is_empty() {
+            anyhow::bail!("No history records found.");
+        }
+
+        let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
+        tx.send(items).map_err(|e| anyhow!("{e}"))?;
+        drop(tx);
+
+        let output = Skim::run_with(build_skim_options(allow_delete)?, Some(rx))
+            .map_err(|e| anyhow!("{e}"))?;
+
+        if output.is_abort {
+            return Ok(());
+        }
+
+        if allow_delete
+            && output.final_key == KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        {
+            if let Some(command) =
+                output.selected_items.first().and_then(|i| history_command(&i.item))
+            {
+                delete_by_command(cfg, &command, &mut all_records)?;
+            }
+            continue;
+        }
+
+        for item in &output.selected_items {
+            print!("{}", item.item.output());
+        }
+        return Ok(());
     }
-
-    let mut map: HashMap<String, History> = HashMap::new();
-    for record in records {
-        let entry = map.entry(record.command.clone());
-        entry
-            .and_modify(|existing| {
-                if record.updated_at > existing.updated_at {
-                    *existing = record.clone();
-                }
-            })
-            .or_insert(record);
-    }
-
-    let mut deduped: Vec<History> = map.into_values().collect();
-    // Most recently used first
-    deduped.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    deduped
 }
 
 #[cfg(test)]
@@ -163,59 +225,64 @@ mod tests {
         }
     }
 
+    /// Convenience: extract command strings from make_deduped_items output.
+    fn commands(records: &[History]) -> Vec<String> {
+        make_deduped_items(records)
+            .iter()
+            .filter_map(|item| history_command(item))
+            .collect()
+    }
+
     #[test]
-    fn dedup_keeps_most_recently_used() {
+    fn dedup_keeps_first_occurrence() {
+        // Server returns newest first; first occurrence of a command = most recent
         let records = vec![
-            make_history(1, "git status", 1000),
-            make_history(2, "git status", 2000), // newer — should win
+            make_history(2, "git status", 2000), // newer — sent first by server
+            make_history(1, "git status", 1000), // older duplicate
             make_history(3, "ls -la", 500),
         ];
 
-        let result = dedup_and_sort(records, true);
+        let result = commands(&records);
 
         assert_eq!(result.len(), 2);
-        let git_status = result.iter().find(|h| h.command == "git status").unwrap();
-        assert_eq!(git_status.id, 2, "newer record should be kept");
+        let items = make_deduped_items(&records);
+        let git_item = items
+            .iter()
+            .find(|i| history_command(i).as_deref() == Some("git status"))
+            .unwrap();
+        // Should keep id=2 (the first record in the slice = most recently used)
+        let hist = (**git_item)
+            .as_any()
+            .downcast_ref::<HistoryItem>()
+            .unwrap();
+        assert_eq!(hist.history.id, 2);
     }
 
     #[test]
-    fn dedup_sorts_by_updated_at_desc() {
+    fn dedup_preserves_server_order() {
+        // Server returns newest-first; dedup should preserve that order
         let records = vec![
+            make_history(3, "echo c", 300),
+            make_history(2, "echo b", 200),
             make_history(1, "echo a", 100),
-            make_history(2, "echo b", 300),
-            make_history(3, "echo c", 200),
         ];
 
-        let result = dedup_and_sort(records, true);
+        let result = commands(&records);
 
-        assert_eq!(result[0].command, "echo b"); // updated_at=300
-        assert_eq!(result[1].command, "echo c"); // updated_at=200
-        assert_eq!(result[2].command, "echo a"); // updated_at=100
-    }
-
-    #[test]
-    fn dedup_false_returns_all_records_unchanged() {
-        let records = vec![
-            make_history(1, "git status", 1000),
-            make_history(2, "git status", 2000),
-        ];
-
-        let result = dedup_and_sort(records, false);
-
-        assert_eq!(result.len(), 2);
+        assert_eq!(result, vec!["echo c", "echo b", "echo a"]);
     }
 
     #[test]
     fn dedup_empty_input_returns_empty() {
-        let result = dedup_and_sort(vec![], true);
+        let result = make_deduped_items(&[]);
         assert!(result.is_empty());
     }
 
     #[test]
     fn dedup_single_record_unchanged() {
         let records = vec![make_history(1, "cargo build", 999)];
-        let result = dedup_and_sort(records, true);
+        let result = commands(&records);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].command, "cargo build");
+        assert_eq!(result[0], "cargo build");
     }
 }
