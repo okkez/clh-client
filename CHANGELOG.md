@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/okkez/clh-client/compare/v0.1.2...v0.1.3) - 2026-03-22
+
+### Other
+
+- use GitHub App token in release-plz-release to trigger downstream workflows
+
 ## [0.1.2](https://github.com/okkez/clh-client/compare/v0.1.1...v0.1.2) - 2026-03-22
 
 ### Fixed
