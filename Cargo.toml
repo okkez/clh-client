@@ -17,10 +17,6 @@ pkg-url = "{ repo }/releases/download/v{ version }/clh-v{ version }-{ target }.t
 bin-dir = "clh{ binary-ext }"
 pkg-fmt = "tgz"
 
-[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
-pkg-url = "{ repo }/releases/download/v{ version }/clh-v{ version }-{ target }.zip"
-pkg-fmt = "zip"
-
 [profile.release]
 strip = true
 opt-level = "z"
