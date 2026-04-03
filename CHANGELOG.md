@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/okkez/clh-client/compare/v0.1.3...v0.1.4) - 2026-04-03
+
+### Added
+
+- drop windows support
+
+### Other
+
+- *(deps)* update rust crate skim to v4.4.0 ([#24](https://github.com/okkez/clh-client/pull/24))
+- *(deps)* update rust crate toml to v1.1.2 ([#23](https://github.com/okkez/clh-client/pull/23))
+- *(deps)* update rust crate toml to v1.1.1 ([#18](https://github.com/okkez/clh-client/pull/18))
+- *(deps)* update rust crate skim to v4.3.0 ([#20](https://github.com/okkez/clh-client/pull/20))
+- *(deps)* update rust crate skim to v4.2.0 ([#16](https://github.com/okkez/clh-client/pull/16))
+- *(deps)* update github actions
+
 ## [0.1.3](https://github.com/okkez/clh-client/compare/v0.1.2...v0.1.3) - 2026-03-22
 
 ### Other
