@@ -63,7 +63,9 @@ fn wrap_command(command: &str, max_width: usize) -> String {
             safe_available
         } else {
             // Try to break at the last space within the allowed width.
-            remaining[..safe_available].rfind(' ').unwrap_or(safe_available)
+            remaining[..safe_available]
+                .rfind(' ')
+                .unwrap_or(safe_available)
         };
 
         result.push_str(&remaining[..break_pos]);
@@ -456,9 +458,6 @@ mod tests {
         let result = std::panic::catch_unwind(|| wrap_command(cmd, 14));
         assert!(result.is_ok(), "wrap_command panicked on non-ASCII input");
         // 2 chars (4 bytes) fit on first line, 2 on second, 1 on third
-        assert_eq!(
-            result.unwrap(),
-            "command : éé\n          éé\n          é"
-        );
+        assert_eq!(result.unwrap(), "command : éé\n          éé\n          é");
     }
 }
