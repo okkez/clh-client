@@ -58,7 +58,7 @@ fn wrap_command(command: &str, max_width: usize) -> String {
         let next_is_space = remaining
             .as_bytes()
             .get(safe_available)
-            .map_or(false, |&b| b == b' ');
+            .is_some_and(|&b| b == b' ');
         let break_pos = if next_is_space {
             safe_available
         } else {
