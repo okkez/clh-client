@@ -15,7 +15,8 @@ use crate::models::History;
 ///
 /// The first line is prefixed with `"command : "` (10 chars); continuation lines
 /// are indented with 10 spaces so everything lines up.  When `max_width` is 0
-/// (e.g. in unit tests that skip terminal sizing) the command is returned as-is.
+/// (e.g. in unit tests that skip terminal sizing), the command is returned
+/// unwrapped, still with the usual `"command : "` prefix.
 fn wrap_command(command: &str, max_width: usize) -> String {
     const PREFIX: &str = "command : ";
     const INDENT: &str = "          "; // 10 spaces
@@ -43,21 +44,36 @@ fn wrap_command(command: &str, max_width: usize) -> String {
             break;
         }
 
-        // If the character right after the available slice is a space (or end),
-        // we can take exactly `available` characters — a clean word boundary.
+        // Find the largest byte offset ≤ available that ends on a valid char boundary,
+        // so we never slice in the middle of a multi-byte codepoint.
+        let safe_available = remaining
+            .char_indices()
+            .map(|(i, c)| i + c.len_utf8())
+            .take_while(|&end| end <= available)
+            .last()
+            .unwrap_or(0);
+
+        // If the character right after safe_available is a space, take exactly that
+        // many bytes — a clean word boundary.
         let next_is_space = remaining
             .as_bytes()
-            .get(available)
+            .get(safe_available)
             .map_or(false, |&b| b == b' ');
         let break_pos = if next_is_space {
-            available
+            safe_available
         } else {
             // Try to break at the last space within the allowed width.
-            remaining[..available].rfind(' ').unwrap_or(available)
+            remaining[..safe_available].rfind(' ').unwrap_or(safe_available)
         };
 
         result.push_str(&remaining[..break_pos]);
-        remaining = remaining[break_pos..].trim_start_matches(' ');
+        // Strip exactly one separator space; preserve any intentional extra spaces.
+        let next_remaining = &remaining[break_pos..];
+        remaining = if next_remaining.as_bytes().first() == Some(&b' ') {
+            &next_remaining[1..]
+        } else {
+            next_remaining
+        };
     }
 
     result
@@ -409,18 +425,40 @@ mod tests {
 
     #[test]
     fn wrap_command_multiple_wraps() {
-        // available = 10 per line; produce 3 lines
+        // max_width=20 → available=10; "aa bb cc dd ee ff" wraps to 2 lines
         let cmd = "aa bb cc dd ee ff";
         let result = wrap_command(cmd, 20);
-        // "aa bb cc" fits in 8 (<10), then "dd ee ff" in 8
-        // Actually let's just verify it wraps at all and reassembling gives original words
+        let expected = "command : aa bb cc\n          dd ee ff";
+        assert_eq!(result, expected);
+
         let lines: Vec<&str> = result.lines().collect();
-        assert!(lines.len() >= 2);
+        assert_eq!(lines.len(), 2);
         let joined = lines
             .iter()
-            .map(|l| l.trim())
+            .enumerate()
+            .map(|(idx, line)| {
+                if idx == 0 {
+                    line.strip_prefix("command : ").unwrap()
+                } else {
+                    line.strip_prefix("          ").unwrap()
+                }
+            })
             .collect::<Vec<_>>()
             .join(" ");
-        assert!(joined.contains("aa") && joined.contains("ff"));
+        assert_eq!(joined, cmd);
+    }
+
+    #[test]
+    fn wrap_command_non_ascii_wraps_safely() {
+        // Each 'é' is 2 bytes (UTF-8). available = 14 - 10 = 4 bytes → fits 2 chars.
+        // "ééééé" (5 × 2 = 10 bytes) should wrap without panicking.
+        let cmd = "ééééé";
+        let result = std::panic::catch_unwind(|| wrap_command(cmd, 14));
+        assert!(result.is_ok(), "wrap_command panicked on non-ASCII input");
+        // 2 chars (4 bytes) fit on first line, 2 on second, 1 on third
+        assert_eq!(
+            result.unwrap(),
+            "command : éé\n          éé\n          é"
+        );
     }
 }
