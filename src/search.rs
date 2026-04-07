@@ -11,29 +11,89 @@ use crate::client;
 use crate::config::Config;
 use crate::models::History;
 
+/// Wrap `command` so that each line fits within `max_width` columns.
+///
+/// The first line is prefixed with `"command : "` (10 chars); continuation lines
+/// are indented with 10 spaces so everything lines up.  When `max_width` is 0
+/// (e.g. in unit tests that skip terminal sizing), the command is returned
+/// unwrapped, still with the usual `"command : "` prefix.
+fn wrap_command(command: &str, max_width: usize) -> String {
+    const PREFIX: &str = "command : ";
+    const INDENT: &str = "          "; // 10 spaces
+    const PREFIX_LEN: usize = PREFIX.len(); // 10
+
+    if max_width == 0 || max_width <= PREFIX_LEN {
+        return format!("{PREFIX}{command}");
+    }
+
+    let available = max_width - PREFIX_LEN;
+    let mut result = String::with_capacity(command.len() + 32);
+    result.push_str(PREFIX);
+
+    let mut remaining = command;
+    let mut first = true;
+    while !remaining.is_empty() {
+        if !first {
+            result.push('\n');
+            result.push_str(INDENT);
+        }
+        first = false;
+
+        if remaining.len() <= available {
+            result.push_str(remaining);
+            break;
+        }
+
+        // Find the largest byte offset ≤ available that ends on a valid char boundary,
+        // so we never slice in the middle of a multi-byte codepoint.
+        let safe_available = remaining
+            .char_indices()
+            .map(|(i, c)| i + c.len_utf8())
+            .take_while(|&end| end <= available)
+            .last()
+            .unwrap_or(0);
+
+        // If the character right after safe_available is a space, take exactly that
+        // many bytes — a clean word boundary.
+        let next_is_space = remaining
+            .as_bytes()
+            .get(safe_available)
+            .is_some_and(|&b| b == b' ');
+        let break_pos = if next_is_space {
+            safe_available
+        } else {
+            // Try to break at the last space within the allowed width.
+            remaining[..safe_available]
+                .rfind(' ')
+                .unwrap_or(safe_available)
+        };
+
+        result.push_str(&remaining[..break_pos]);
+        // Strip exactly one separator space; preserve any intentional extra spaces.
+        let next_remaining = &remaining[break_pos..];
+        remaining = if next_remaining.as_bytes().first() == Some(&b' ') {
+            &next_remaining[1..]
+        } else {
+            next_remaining
+        };
+    }
+
+    result
+}
+
 /// A skim item wrapping a History record.
 struct HistoryItem {
     history: History,
     /// The text shown in the skim list (command string)
     display_text: String,
-    /// Preview text (shown in preview window)
-    preview_text: String,
 }
 
 impl HistoryItem {
     fn new(history: History) -> Self {
-        let preview_text = format!(
-            "command : {}\nhostname: {}\npwd     : {}\nupdated : {}",
-            history.command,
-            history.hostname,
-            history.working_directory.as_deref().unwrap_or("-"),
-            history.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        );
         let display_text = history.command.clone();
         Self {
             history,
             display_text,
-            preview_text,
         }
     }
 }
@@ -43,8 +103,16 @@ impl SkimItem for HistoryItem {
         Cow::Borrowed(&self.display_text)
     }
 
-    fn preview(&self, _ctx: PreviewContext) -> ItemPreview {
-        ItemPreview::Text(self.preview_text.clone())
+    fn preview(&self, ctx: PreviewContext) -> ItemPreview {
+        let command_line = wrap_command(&self.history.command, ctx.width);
+        let text = format!(
+            "{}\nhostname: {}\npwd     : {}\nupdated : {}",
+            command_line,
+            self.history.hostname,
+            self.history.working_directory.as_deref().unwrap_or("-"),
+            self.history.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
+        );
+        ItemPreview::Text(text)
     }
 
     fn output(&self) -> Cow<'_, str> {
@@ -318,5 +386,78 @@ mod tests {
         let result = commands(&records);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "cargo build");
+    }
+
+    // --- wrap_command tests ---
+
+    #[test]
+    fn wrap_command_short_fits_on_one_line() {
+        let result = wrap_command("ls -la", 40);
+        assert_eq!(result, "command : ls -la");
+    }
+
+    #[test]
+    fn wrap_command_zero_width_returns_as_is() {
+        let result = wrap_command("ls -la", 0);
+        assert_eq!(result, "command : ls -la");
+    }
+
+    #[test]
+    fn wrap_command_wraps_at_space() {
+        // max_width=20 → available=10; "git commit -m 'fix'" is longer
+        // "git commit" fits in 10, next word "-m" starts new line
+        let result = wrap_command("git commit -m 'fix'", 20);
+        assert_eq!(result, "command : git commit\n          -m 'fix'");
+    }
+
+    #[test]
+    fn wrap_command_no_space_breaks_at_width() {
+        // A single long token with no spaces must be cut hard at available width (10)
+        // 25 'a's → 10 + 10 + 5 across three lines
+        let long = "a".repeat(25);
+        let result = wrap_command(&long, 20);
+        let expected = format!(
+            "command : {}\n          {}\n          {}",
+            "a".repeat(10),
+            "a".repeat(10),
+            "a".repeat(5)
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn wrap_command_multiple_wraps() {
+        // max_width=20 → available=10; "aa bb cc dd ee ff" wraps to 2 lines
+        let cmd = "aa bb cc dd ee ff";
+        let result = wrap_command(cmd, 20);
+        let expected = "command : aa bb cc\n          dd ee ff";
+        assert_eq!(result, expected);
+
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let joined = lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| {
+                if idx == 0 {
+                    line.strip_prefix("command : ").unwrap()
+                } else {
+                    line.strip_prefix("          ").unwrap()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(joined, cmd);
+    }
+
+    #[test]
+    fn wrap_command_non_ascii_wraps_safely() {
+        // Each 'é' is 2 bytes (UTF-8). available = 14 - 10 = 4 bytes → fits 2 chars.
+        // "ééééé" (5 × 2 = 10 bytes) should wrap without panicking.
+        let cmd = "ééééé";
+        let result = std::panic::catch_unwind(|| wrap_command(cmd, 14));
+        assert!(result.is_ok(), "wrap_command panicked on non-ASCII input");
+        // 2 chars (4 bytes) fit on first line, 2 on second, 1 on third
+        assert_eq!(result.unwrap(), "command : éé\n          éé\n          é");
     }
 }
