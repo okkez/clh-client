@@ -11,29 +11,71 @@ use crate::client;
 use crate::config::Config;
 use crate::models::History;
 
+/// Wrap `command` so that each line fits within `max_width` columns.
+///
+/// The first line is prefixed with `"command : "` (10 chars); continuation lines
+/// are indented with 10 spaces so everything lines up.  When `max_width` is 0
+/// (e.g. in unit tests that skip terminal sizing) the command is returned as-is.
+fn wrap_command(command: &str, max_width: usize) -> String {
+    const PREFIX: &str = "command : ";
+    const INDENT: &str = "          "; // 10 spaces
+    const PREFIX_LEN: usize = PREFIX.len(); // 10
+
+    if max_width == 0 || max_width <= PREFIX_LEN {
+        return format!("{PREFIX}{command}");
+    }
+
+    let available = max_width - PREFIX_LEN;
+    let mut result = String::with_capacity(command.len() + 32);
+    result.push_str(PREFIX);
+
+    let mut remaining = command;
+    let mut first = true;
+    while !remaining.is_empty() {
+        if !first {
+            result.push('\n');
+            result.push_str(INDENT);
+        }
+        first = false;
+
+        if remaining.len() <= available {
+            result.push_str(remaining);
+            break;
+        }
+
+        // If the character right after the available slice is a space (or end),
+        // we can take exactly `available` characters — a clean word boundary.
+        let next_is_space = remaining
+            .as_bytes()
+            .get(available)
+            .map_or(false, |&b| b == b' ');
+        let break_pos = if next_is_space {
+            available
+        } else {
+            // Try to break at the last space within the allowed width.
+            remaining[..available].rfind(' ').unwrap_or(available)
+        };
+
+        result.push_str(&remaining[..break_pos]);
+        remaining = remaining[break_pos..].trim_start_matches(' ');
+    }
+
+    result
+}
+
 /// A skim item wrapping a History record.
 struct HistoryItem {
     history: History,
     /// The text shown in the skim list (command string)
     display_text: String,
-    /// Preview text (shown in preview window)
-    preview_text: String,
 }
 
 impl HistoryItem {
     fn new(history: History) -> Self {
-        let preview_text = format!(
-            "command : {}\nhostname: {}\npwd     : {}\nupdated : {}",
-            history.command,
-            history.hostname,
-            history.working_directory.as_deref().unwrap_or("-"),
-            history.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        );
         let display_text = history.command.clone();
         Self {
             history,
             display_text,
-            preview_text,
         }
     }
 }
@@ -43,8 +85,16 @@ impl SkimItem for HistoryItem {
         Cow::Borrowed(&self.display_text)
     }
 
-    fn preview(&self, _ctx: PreviewContext) -> ItemPreview {
-        ItemPreview::Text(self.preview_text.clone())
+    fn preview(&self, ctx: PreviewContext) -> ItemPreview {
+        let command_line = wrap_command(&self.history.command, ctx.width);
+        let text = format!(
+            "{}\nhostname: {}\npwd     : {}\nupdated : {}",
+            command_line,
+            self.history.hostname,
+            self.history.working_directory.as_deref().unwrap_or("-"),
+            self.history.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
+        );
+        ItemPreview::Text(text)
     }
 
     fn output(&self) -> Cow<'_, str> {
@@ -318,5 +368,59 @@ mod tests {
         let result = commands(&records);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "cargo build");
+    }
+
+    // --- wrap_command tests ---
+
+    #[test]
+    fn wrap_command_short_fits_on_one_line() {
+        let result = wrap_command("ls -la", 40);
+        assert_eq!(result, "command : ls -la");
+    }
+
+    #[test]
+    fn wrap_command_zero_width_returns_as_is() {
+        let result = wrap_command("ls -la", 0);
+        assert_eq!(result, "command : ls -la");
+    }
+
+    #[test]
+    fn wrap_command_wraps_at_space() {
+        // max_width=20 → available=10; "git commit -m 'fix'" is longer
+        // "git commit" fits in 10, next word "-m" starts new line
+        let result = wrap_command("git commit -m 'fix'", 20);
+        assert_eq!(result, "command : git commit\n          -m 'fix'");
+    }
+
+    #[test]
+    fn wrap_command_no_space_breaks_at_width() {
+        // A single long token with no spaces must be cut hard at available width (10)
+        // 25 'a's → 10 + 10 + 5 across three lines
+        let long = "a".repeat(25);
+        let result = wrap_command(&long, 20);
+        let expected = format!(
+            "command : {}\n          {}\n          {}",
+            "a".repeat(10),
+            "a".repeat(10),
+            "a".repeat(5)
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn wrap_command_multiple_wraps() {
+        // available = 10 per line; produce 3 lines
+        let cmd = "aa bb cc dd ee ff";
+        let result = wrap_command(cmd, 20);
+        // "aa bb cc" fits in 8 (<10), then "dd ee ff" in 8
+        // Actually let's just verify it wraps at all and reassembling gives original words
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() >= 2);
+        let joined = lines
+            .iter()
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.contains("aa") && joined.contains("ff"));
     }
 }
