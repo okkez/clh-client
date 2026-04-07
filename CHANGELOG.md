@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/okkez/clh-client/compare/v0.1.3...v0.1.4) - 2026-04-07
+
+### Added
+
+- *(search)* wrap long commands in preview window to fit terminal width
+- drop windows support
+
+### Fixed
+
+- *(search)* use is_some_and instead of map_or(false, ...) for clippy
+- *(search)* address PR review comments on wrap_command
+
+### Other
+
+- *(deps)* update rust crate skim to v4.5.0 ([#26](https://github.com/okkez/clh-client/pull/26))
+- cargo fmt
+
 ## [0.1.3](https://github.com/okkez/clh-client/compare/v0.1.2...v0.1.3) - 2026-03-22
 
 ### Other
