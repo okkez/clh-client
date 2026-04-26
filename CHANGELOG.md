@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/okkez/clh-client/compare/v0.1.4...v0.1.5) - 2026-04-26
+
+### Other
+
+- *(deps)* update rust crate skim to v4.6.1 ([#36](https://github.com/okkez/clh-client/pull/36))
+- *(deps)* update github actions
+- *(deps)* update rust crate clap to v4.6.1 ([#34](https://github.com/okkez/clh-client/pull/34))
+- *(deps)* update rust crate skim to v4.6.0 ([#33](https://github.com/okkez/clh-client/pull/33))
+- *(deps)* update github actions
+- *(deps)* update taiki-e/install-action action to v2.75.3
+- *(deps)* update taiki-e/install-action action to v2.75.1
+
 ## [0.1.4](https://github.com/okkez/clh-client/compare/v0.1.3...v0.1.4) - 2026-04-07
 
 ### Added
