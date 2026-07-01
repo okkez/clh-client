@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/okkez/clh-client/compare/v0.1.4...v0.1.5) - 2026-07-01
+
+### Other
+
+- *(deps)* update taiki-e/install-action action to v2.82.7
+- *(deps)* update github actions
+- *(deps)* update rust crate skim to v4.10.0 ([#56](https://github.com/okkez/clh-client/pull/56))
+- *(deps)* update rust crate skim to v4.9.0 ([#55](https://github.com/okkez/clh-client/pull/55))
+- *(deps)* update rust crate anyhow to v1.0.103 ([#54](https://github.com/okkez/clh-client/pull/54))
+- *(deps)* update github actions
+- *(deps)* update github actions to v2.82.2
+- *(deps)* update github actions to v7
+- *(deps)* update rust crate skim to v4.8.0 ([#49](https://github.com/okkez/clh-client/pull/49))
+- *(deps)* update github actions
+- *(deps)* update github actions
+- *(deps)* update rust crate regex to v1.12.4 ([#47](https://github.com/okkez/clh-client/pull/47))
+- *(deps)* update rust crate chrono to v0.4.45 ([#46](https://github.com/okkez/clh-client/pull/46))
+- *(deps)* update github actions
+- *(deps)* update rust crate skim to v4.7.0 ([#44](https://github.com/okkez/clh-client/pull/44))
+- *(deps)* update rust crate serde_json to v1.0.150 ([#43](https://github.com/okkez/clh-client/pull/43))
+- *(deps)* update rust crate skim to v4.6.3 ([#42](https://github.com/okkez/clh-client/pull/42))
+- *(deps)* update actions/create-github-app-token action to v3.2.0
+- *(deps)* update github actions
+- *(deps)* update github actions
+- *(deps)* update rust crate skim to v4.6.2 ([#38](https://github.com/okkez/clh-client/pull/38))
+- *(deps)* update taiki-e/install-action action to v2.75.26
+- *(deps)* update rust crate skim to v4.6.1 ([#36](https://github.com/okkez/clh-client/pull/36))
+- *(deps)* update github actions
+- *(deps)* update rust crate clap to v4.6.1 ([#34](https://github.com/okkez/clh-client/pull/34))
+- *(deps)* update rust crate skim to v4.6.0 ([#33](https://github.com/okkez/clh-client/pull/33))
+- *(deps)* update github actions
+- *(deps)* update taiki-e/install-action action to v2.75.3
+- *(deps)* update taiki-e/install-action action to v2.75.1
+
 ## [0.1.4](https://github.com/okkez/clh-client/compare/v0.1.3...v0.1.4) - 2026-04-07
 
 ### Added
