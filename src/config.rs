@@ -200,6 +200,6 @@ ignore_patterns = ["^ls", "^cd ", "^pwd$"]
     #[test]
     fn add_config_defaults_to_empty() {
         let cfg: Config = toml::from_str(minimal_config_toml()).unwrap();
-        assert!(cfg.add.ignore_patterns.is_empty());
+        assert_eq!(cfg.add.ignore_patterns, Vec::<String>::new());
     }
 }
