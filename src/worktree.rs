@@ -43,8 +43,19 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    /// Run `git` isolated from the developer's environment: ignore global/system
+    /// config (e.g. `commit.gpgsign`, `core.hooksPath`) and any inherited `GIT_*`
+    /// variables (e.g. `GIT_DIR` when tests run from a git hook).
     fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
+        let mut cmd = Command::new("git");
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("GIT_") {
+                cmd.env_remove(key);
+            }
+        }
+        let output = cmd
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .arg("-C")
             .arg(dir)
             .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
@@ -52,9 +63,9 @@ mod tests {
             .output()
             .expect("failed to run git");
         assert!(
-            status.status.success(),
+            output.status.success(),
             "git {args:?} failed: {}",
-            String::from_utf8_lossy(&status.stderr)
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 
