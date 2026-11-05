@@ -273,28 +273,40 @@ fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    // Ctrl+D: take a snapshot of whatever has been fetched so far (speed over completeness).
     if let Some(item) = output.selected_items.first() {
-        let snapshot = collected.lock().expect("collected mutex poisoned").clone();
-        if let Some(pwd) = pwd {
-            // ^S mode: delete all records with the same command recorded in `pwd`
-            if let Some(command) = history_command(&item.item) {
-                delete_by_command(cfg, &command, pwd, &snapshot)?;
-            }
-        } else {
-            // ^T mode: delete only the single displayed record
-            if let Some(id) = history_id(&item.item) {
-                delete_by_id(cfg, id)?;
-            }
-        }
+        delete_selected(cfg, &item.item, &pwds, &collected)?;
     }
 
     // Post-delete loop: start a fresh streaming session so the user sees up-to-date results.
-    post_delete_loop(cfg, pwd, &pwds)
+    post_delete_loop(cfg, &pwds)
+}
+
+/// Handle Ctrl+D on `item`.
+///
+/// `pwds` is the search scope from [`search_pwds`]: empty for global mode (^T), where
+/// only the selected record is deleted; otherwise `pwds[0]` is the current directory
+/// (^S), and every record of the selected command recorded there is deleted.
+/// Deletion works on a snapshot of whatever has been fetched so far (speed over
+/// completeness).
+fn delete_selected(
+    cfg: &Config,
+    item: &Arc<dyn SkimItem>,
+    pwds: &[String],
+    collected: &Mutex<Vec<History>>,
+) -> Result<()> {
+    let snapshot = collected.lock().expect("collected mutex poisoned").clone();
+    if let Some(pwd) = pwds.first() {
+        if let Some(command) = history_command(item) {
+            delete_by_command(cfg, &command, pwd, &snapshot)?;
+        }
+    } else if let Some(id) = history_id(item) {
+        delete_by_id(cfg, id)?;
+    }
+    Ok(())
 }
 
 /// Run the post-delete skim loop. Opens a fresh streaming session each time.
-fn post_delete_loop(cfg: &Config, pwd: Option<&str>, pwds: &[String]) -> Result<()> {
+fn post_delete_loop(cfg: &Config, pwds: &[String]) -> Result<()> {
     loop {
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
         let collected = spawn_stream_thread(cfg.clone(), pwds.to_vec(), tx);
@@ -317,14 +329,7 @@ fn post_delete_loop(cfg: &Config, pwd: Option<&str>, pwds: &[String]) -> Result<
         }
 
         if let Some(item) = output.selected_items.first() {
-            let snapshot = collected.lock().expect("collected mutex poisoned").clone();
-            if let Some(pwd) = pwd {
-                if let Some(command) = history_command(&item.item) {
-                    delete_by_command(cfg, &command, pwd, &snapshot)?;
-                }
-            } else if let Some(id) = history_id(&item.item) {
-                delete_by_id(cfg, id)?;
-            }
+            delete_selected(cfg, &item.item, pwds, &collected)?;
         }
         // loop: open another fresh session
     }
