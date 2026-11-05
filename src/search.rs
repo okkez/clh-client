@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -163,17 +163,37 @@ fn ids_to_delete(records: &[History], command: &str, pwd: &str) -> Vec<i32> {
 
 /// Directories to search for pwd-scoped mode (^S): `pwd` itself, plus the same
 /// position in the main working tree when `pwd` is inside a linked git worktree.
+///
+/// `pwd` is normalized like the shell's `$PWD` (absolute, no trailing slash, no `.`
+/// components) because both the server filter and Ctrl+D compare paths exactly.
 fn search_pwds(pwd: &str) -> Vec<String> {
-    let mut pwds = vec![pwd.to_string()];
+    let pwd = normalize_pwd(pwd);
     // A non-UTF-8 path can't match any stored record, so skip it rather than
     // sending a lossily converted one.
-    if let Some(dir) = worktree::counterpart_dir(Path::new(pwd))
+    let counterpart = worktree::counterpart_dir(Path::new(&pwd))
         .as_deref()
         .and_then(Path::to_str)
-    {
-        pwds.push(dir.to_string());
-    }
-    pwds
+        .map(str::to_string);
+    std::iter::once(pwd).chain(counterpart).collect()
+}
+
+/// Make `pwd` absolute and drop trailing slashes and `.` components, without
+/// resolving symlinks or `..` (which would diverge from the logical `$PWD`).
+/// Falls back to `pwd` as given if the result isn't valid UTF-8.
+fn normalize_pwd(pwd: &str) -> String {
+    let path = Path::new(pwd);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(_) => return pwd.to_string(),
+        }
+    };
+    let normalized: PathBuf = absolute.components().collect();
+    normalized
+        .to_str()
+        .map_or_else(|| pwd.to_string(), str::to_string)
 }
 
 /// Delete all server records in `pwd` that share `command`.
@@ -456,6 +476,20 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let pwd = tmp.path().to_str().unwrap();
         assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
+    }
+
+    #[test]
+    fn search_pwds_normalizes_trailing_slash_and_dot_components() {
+        // Stored records use `$PWD` (no trailing slash, no `.`), and the query and
+        // Ctrl+D both compare exactly, so `--pwd` must be normalized the same way.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pwd = tmp.path().to_str().unwrap();
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let sub = sub.to_str().unwrap();
+
+        assert_eq!(search_pwds(&format!("{pwd}/")), vec![pwd.to_string()]);
+        assert_eq!(search_pwds(&format!("{pwd}/./sub")), vec![sub.to_string()]);
     }
 
     #[test]
