@@ -219,23 +219,41 @@ fn delete_by_command(
     Ok(())
 }
 
+/// A background fetch started by [`spawn_stream_thread`].
+struct HistoryStream {
+    /// Records fetched so far; the caller can look at them at any time without
+    /// waiting for the thread to finish.
+    collected: Arc<Mutex<Vec<History>>>,
+    /// The fetch error, if fetching failed.
+    error: Arc<Mutex<Option<String>>>,
+    /// Kept for tests. In normal use the thread is left detached: it finishes on its
+    /// own, and dropping the handle does NOT kill it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    handle: thread::JoinHandle<()>,
+}
+
+impl HistoryStream {
+    /// Print the fetch error, if any, once skim has closed the screen. Without this a
+    /// failed fetch (auth error, older server rejecting repeated `pwd`) would look
+    /// exactly like "no history".
+    fn report_error(&self) {
+        if let Some(error) = self.error.lock().expect("error mutex poisoned").as_deref() {
+            eprintln!("clh: failed to fetch history: {error}");
+        }
+    }
+}
+
 /// Spawn a background thread that fetches history pages and streams `HistoryItem`s to `tx`.
-/// Fetched records are also accumulated in the returned `Arc<Mutex<Vec<History>>>` so the
-/// caller can take a snapshot at any time without waiting for the thread to finish.
-/// The `JoinHandle` is intentionally discarded — the thread is detached and will finish on
-/// its own; dropping the handle does NOT kill the thread in Rust.
-fn spawn_stream_thread(
-    cfg: Config,
-    pwds: Vec<String>,
-    tx: SkimItemSender,
-) -> Arc<Mutex<Vec<History>>> {
+fn spawn_stream_thread(cfg: Config, pwds: Vec<String>, tx: SkimItemSender) -> HistoryStream {
     let collected: Arc<Mutex<Vec<History>>> = Arc::new(Mutex::new(Vec::new()));
     let collected_bg = Arc::clone(&collected);
+    let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let error_bg = Arc::clone(&error);
 
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let mut seen: HashSet<String> = HashSet::new();
 
-        let _ = client::for_each_page(&cfg, &pwds, |page| {
+        let result = client::for_each_page(&cfg, &pwds, |page| {
             {
                 let mut guard = collected_bg.lock().expect("collected mutex poisoned");
                 guard.extend(page.iter().cloned());
@@ -250,10 +268,17 @@ fn spawn_stream_thread(
             }
             Ok(())
         });
+        if let Err(e) = result {
+            *error_bg.lock().expect("error mutex poisoned") = Some(format!("{e:#}"));
+        }
         // tx dropped here → skim receives EOF
     });
 
-    collected
+    HistoryStream {
+        collected,
+        error,
+        handle,
+    }
 }
 
 /// Fetch all history records, deduplicate, launch skim, and print the selected command.
@@ -274,10 +299,11 @@ fn is_ctrl_d(key: KeyEvent) -> bool {
 fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
     let pwds = pwd.map(search_pwds).unwrap_or_default();
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-    let collected = spawn_stream_thread(cfg.clone(), pwds.clone(), tx);
+    let stream = spawn_stream_thread(cfg.clone(), pwds.clone(), tx);
 
     let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
         .map_err(|e| anyhow!("{e}"))?;
+    stream.report_error();
 
     // Fast path: abort or Enter — return immediately without waiting for the stream thread.
     // The thread is detached and will finish on its own.
@@ -297,7 +323,7 @@ fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
     }
 
     if let Some(item) = output.selected_items.first() {
-        delete_selected(cfg, &item.item, &pwds, &collected)?;
+        delete_selected(cfg, &item.item, &pwds, &stream.collected)?;
     }
 
     // Post-delete loop: start a fresh streaming session so the user sees up-to-date results.
@@ -332,10 +358,11 @@ fn delete_selected(
 fn post_delete_loop(cfg: &Config, pwds: &[String]) -> Result<()> {
     loop {
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-        let collected = spawn_stream_thread(cfg.clone(), pwds.to_vec(), tx);
+        let stream = spawn_stream_thread(cfg.clone(), pwds.to_vec(), tx);
 
         let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
             .map_err(|e| anyhow!("{e}"))?;
+        stream.report_error();
 
         if output.is_abort {
             return Ok(());
@@ -352,7 +379,7 @@ fn post_delete_loop(cfg: &Config, pwds: &[String]) -> Result<()> {
         }
 
         if let Some(item) = output.selected_items.first() {
-            delete_selected(cfg, &item.item, pwds, &collected)?;
+            delete_selected(cfg, &item.item, pwds, &stream.collected)?;
         }
         // loop: open another fresh session
     }
@@ -440,6 +467,42 @@ mod tests {
         let result = commands(&records);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "cargo build");
+    }
+
+    // --- stream thread tests ---
+
+    #[test]
+    fn stream_thread_keeps_fetch_error_for_the_caller() {
+        // e.g. an older clh-server rejecting repeated `pwd` keys with 400 must not
+        // look like "no history".
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(400)
+            .create();
+        let cfg = Config {
+            server: crate::config::ServerConfig {
+                url: server.url(),
+                basic_auth_user: None,
+                basic_auth_password: None,
+            },
+            search: crate::config::SearchConfig::default(),
+            add: crate::config::AddConfig::default(),
+        };
+
+        let (tx, _rx): (SkimItemSender, SkimItemReceiver) = unbounded();
+        let stream = spawn_stream_thread(cfg, vec!["/a".into(), "/b".into()], tx);
+        let HistoryStream { handle, error, .. } = stream;
+        handle.join().unwrap();
+        drop(server);
+
+        let error = error
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("fetch error should be kept");
+        assert!(error.contains("400"), "unexpected error: {error}");
     }
 
     // --- pwd-scoped deletion tests ---
