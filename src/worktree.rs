@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 ///
 /// Returns `None` when `pwd` is not inside a linked worktree: plain repository
 /// (`.git` is a directory), submodule (its git dir has no `commondir`), worktree of a
-/// bare repository (common dir is not named `.git`), or a non-git directory.
+/// bare repository (`core.bare = true`, or common dir not named `.git`), or a non-git
+/// directory.
 /// Setups driven by `GIT_DIR` / `core.worktree` are not detected.
 pub fn counterpart_dir(pwd: &Path) -> Option<PathBuf> {
     // `$PWD` may go through symlinks; work with the physical path like git does.
@@ -28,13 +29,38 @@ pub fn counterpart_dir(pwd: &Path) -> Option<PathBuf> {
     let git_dir = toplevel.join(content.strip_prefix("gitdir:")?.trim());
     let common_dir = fs::read_to_string(git_dir.join("commondir")).ok()?;
     let common_dir = git_dir.join(common_dir.trim()).canonicalize().ok()?;
-    if common_dir.file_name()? != ".git" {
+    if common_dir.file_name()? != ".git" || is_bare(&common_dir) {
         return None;
     }
 
     let main_root = common_dir.parent()?;
     let relative = pwd.strip_prefix(toplevel).ok()?;
     Some(main_root.join(relative))
+}
+
+/// Whether `<git_dir>/config` sets `core.bare` to true.
+///
+/// A bare repository can still be named `.git` (`git clone --bare URL proj/.git`),
+/// so the directory name alone doesn't tell whether a main working tree exists.
+fn is_bare(git_dir: &Path) -> bool {
+    let Ok(config) = fs::read_to_string(git_dir.join("config")) else {
+        return false;
+    };
+    let mut in_core = false;
+    for line in config.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_core = line.eq_ignore_ascii_case("[core]");
+        } else if in_core
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim().eq_ignore_ascii_case("bare")
+        {
+            return matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "true" | "yes" | "on" | "1"
+            );
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -161,6 +187,42 @@ mod tests {
             ],
         );
         let wt = base.join("wt");
+        git(
+            &bare_repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                wt.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(counterpart_dir(&wt), None);
+    }
+
+    #[test]
+    fn worktree_of_bare_repository_named_dot_git_has_no_counterpart() {
+        // Layout from `git clone --bare URL proj/.git` with worktrees next to it.
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let seed = base.join("seed");
+        fs::create_dir(&seed).unwrap();
+        git(&seed, &["init", "-q"]);
+        git(&seed, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let proj = base.join("proj");
+        let bare_repo = proj.join(".git");
+        git(
+            &base,
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                seed.to_str().unwrap(),
+                bare_repo.to_str().unwrap(),
+            ],
+        );
+        let wt = proj.join("feature");
         git(
             &bare_repo,
             &[
