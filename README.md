@@ -87,6 +87,19 @@ This sets up:
 - **Ctrl+S binding**: fuzzy search filtered to the **current directory** — the selected command is pasted into your prompt
 - **Ctrl+T binding**: fuzzy search across **all history** — the selected command is pasted into your prompt
 
+### git worktree support
+
+When `Ctrl+S` (`clh search --pwd`) is used inside a linked git worktree, history recorded at the
+same relative position in the main working tree is merged in (newest first). For example, in
+`~/src/app-wt/feature-x/src`, history from both that directory and `~/src/app/src` is shown, so
+commands like `cargo test` or `bundle exec cap ...` run in the main checkout are available.
+
+- Outside a linked worktree (plain repository, non-git directory, worktree of a bare repository),
+  only the current directory is searched, as before.
+- `Ctrl+D` deletes only the records in the current (worktree) directory; history in the main
+  working tree is kept.
+- Requires a clh-server that accepts repeated `pwd` query parameters (`?pwd=A&pwd=B`).
+
 ## Usage
 
 | Command | Description |
@@ -110,7 +123,7 @@ This sets up:
 | `Ctrl+N` / `↓` | Move down |
 
 > **Note on `Ctrl+D` deletion:**
-> - In directory search (`Ctrl+S`): deletes **all** server records with that command name (scoped to the current directory's records).
+> - In directory search (`Ctrl+S`): deletes **all** server records with that command name (scoped to the current directory's records; in a git worktree, records from the main working tree are kept).
 > - In global search (`Ctrl+T`): deletes **only the single displayed record** to avoid accidentally removing history used in other directories.
 
 ## Server-side pagination

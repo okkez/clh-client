@@ -5,6 +5,7 @@ mod config;
 mod models;
 mod search;
 mod setup;
+mod worktree;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

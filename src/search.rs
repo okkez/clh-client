@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -10,6 +11,7 @@ use skim::prelude::*;
 use crate::client;
 use crate::config::Config;
 use crate::models::History;
+use crate::worktree;
 
 /// Wrap `command` so that each line fits within `max_width` columns.
 ///
@@ -147,27 +149,45 @@ fn build_skim_options(height: &str) -> Result<SkimOptions> {
         .map_err(|e| anyhow!("{e}"))
 }
 
-/// Deduplicate records by command, keeping the first occurrence (server returns newest first).
-/// Delete all server records that share `command`, then remove them from `records`.
-/// Used in pwd-scoped mode (^S) where all duplicates in the current directory should go.
-fn delete_by_command(cfg: &Config, command: &str, records: &mut Vec<History>) -> Result<()> {
-    let ids: Vec<i32> = records
+/// IDs of records with `command` recorded in exactly `pwd`.
+///
+/// In a git worktree the list also contains records from the main working tree;
+/// those are intentionally left alone.
+fn ids_to_delete(records: &[History], command: &str, pwd: &str) -> Vec<i32> {
+    records
         .iter()
-        .filter(|r| r.command == command)
+        .filter(|r| r.command == command && r.working_directory.as_deref() == Some(pwd))
         .map(|r| r.id)
-        .collect();
+        .collect()
+}
+
+/// Directories to search for pwd-scoped mode (^S): `pwd` itself, plus the same
+/// position in the main working tree when `pwd` is inside a linked git worktree.
+fn search_pwds(pwd: &str) -> Vec<String> {
+    let mut pwds = vec![pwd.to_string()];
+    if let Some(dir) = worktree::counterpart_dir(Path::new(pwd)) {
+        pwds.push(dir.to_string_lossy().into_owned());
+    }
+    pwds
+}
+
+/// Delete all server records in `pwd` that share `command`.
+/// Used in pwd-scoped mode (^S) where all duplicates in the current directory should go.
+fn delete_by_command(cfg: &Config, command: &str, pwd: &str, records: &[History]) -> Result<()> {
+    let ids = ids_to_delete(records, command, pwd);
+    if ids.is_empty() {
+        eprintln!("clh: no record of this command in {pwd}; nothing deleted");
+    }
     for id in ids {
         client::delete_history(cfg, id)?;
     }
-    records.retain(|r| r.command != command);
     Ok(())
 }
 
-/// Delete a single record by ID, then remove it from `records`.
+/// Delete a single record by ID.
 /// Used in global mode (^T) to avoid accidentally deleting history from other directories.
-fn delete_by_id(cfg: &Config, id: i32, records: &mut Vec<History>) -> Result<()> {
+fn delete_by_id(cfg: &Config, id: i32) -> Result<()> {
     client::delete_history(cfg, id)?;
-    records.retain(|r| r.id != id);
     Ok(())
 }
 
@@ -178,7 +198,7 @@ fn delete_by_id(cfg: &Config, id: i32, records: &mut Vec<History>) -> Result<()>
 /// its own; dropping the handle does NOT kill the thread in Rust.
 fn spawn_stream_thread(
     cfg: Config,
-    pwd: Option<String>,
+    pwds: Vec<String>,
     tx: SkimItemSender,
 ) -> Arc<Mutex<Vec<History>>> {
     let collected: Arc<Mutex<Vec<History>>> = Arc::new(Mutex::new(Vec::new()));
@@ -187,7 +207,7 @@ fn spawn_stream_thread(
     thread::spawn(move || {
         let mut seen: HashSet<String> = HashSet::new();
 
-        let _ = client::for_each_page(&cfg, pwd.as_deref(), |page| {
+        let _ = client::for_each_page(&cfg, &pwds, |page| {
             {
                 let mut guard = collected_bg.lock().expect("collected mutex poisoned");
                 guard.extend(page.iter().cloned());
@@ -224,8 +244,9 @@ fn is_ctrl_d(key: KeyEvent) -> bool {
 }
 
 fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
+    let pwds = pwd.map(search_pwds).unwrap_or_default();
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-    let collected = spawn_stream_thread(cfg.clone(), pwd.map(str::to_string), tx);
+    let collected = spawn_stream_thread(cfg.clone(), pwds.clone(), tx);
 
     let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
         .map_err(|e| anyhow!("{e}"))?;
@@ -249,29 +270,29 @@ fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
 
     // Ctrl+D: take a snapshot of whatever has been fetched so far (speed over completeness).
     if let Some(item) = output.selected_items.first() {
-        let mut snapshot = collected.lock().expect("collected mutex poisoned").clone();
-        if pwd.is_some() {
-            // ^S mode: delete all records with the same command (pwd-scoped set)
+        let snapshot = collected.lock().expect("collected mutex poisoned").clone();
+        if let Some(pwd) = pwd {
+            // ^S mode: delete all records with the same command recorded in `pwd`
             if let Some(command) = history_command(&item.item) {
-                delete_by_command(cfg, &command, &mut snapshot)?;
+                delete_by_command(cfg, &command, pwd, &snapshot)?;
             }
         } else {
             // ^T mode: delete only the single displayed record
             if let Some(id) = history_id(&item.item) {
-                delete_by_id(cfg, id, &mut snapshot)?;
+                delete_by_id(cfg, id)?;
             }
         }
     }
 
     // Post-delete loop: start a fresh streaming session so the user sees up-to-date results.
-    post_delete_loop(cfg, pwd)
+    post_delete_loop(cfg, pwd, &pwds)
 }
 
 /// Run the post-delete skim loop. Opens a fresh streaming session each time.
-fn post_delete_loop(cfg: &Config, pwd: Option<&str>) -> Result<()> {
+fn post_delete_loop(cfg: &Config, pwd: Option<&str>, pwds: &[String]) -> Result<()> {
     loop {
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
-        let collected = spawn_stream_thread(cfg.clone(), pwd.map(str::to_string), tx);
+        let collected = spawn_stream_thread(cfg.clone(), pwds.to_vec(), tx);
 
         let output = Skim::run_with(build_skim_options(&cfg.search.height)?, Some(rx))
             .map_err(|e| anyhow!("{e}"))?;
@@ -291,13 +312,13 @@ fn post_delete_loop(cfg: &Config, pwd: Option<&str>) -> Result<()> {
         }
 
         if let Some(item) = output.selected_items.first() {
-            let mut snapshot = collected.lock().expect("collected mutex poisoned").clone();
-            if pwd.is_some() {
+            let snapshot = collected.lock().expect("collected mutex poisoned").clone();
+            if let Some(pwd) = pwd {
                 if let Some(command) = history_command(&item.item) {
-                    delete_by_command(cfg, &command, &mut snapshot)?;
+                    delete_by_command(cfg, &command, pwd, &snapshot)?;
                 }
             } else if let Some(id) = history_id(&item.item) {
-                delete_by_id(cfg, id, &mut snapshot)?;
+                delete_by_id(cfg, id)?;
             }
         }
         // loop: open another fresh session
@@ -386,6 +407,45 @@ mod tests {
         let result = commands(&records);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "cargo build");
+    }
+
+    // --- pwd-scoped deletion tests ---
+
+    fn make_history_in(id: i32, command: &str, dir: &str) -> History {
+        History {
+            working_directory: Some(dir.to_string()),
+            ..make_history(id, command, 0)
+        }
+    }
+
+    #[test]
+    fn ids_to_delete_only_targets_records_in_current_pwd() {
+        let records = vec![
+            make_history_in(1, "cargo test", "/repo/wt"),
+            make_history_in(2, "cargo test", "/repo/main"),
+            make_history_in(3, "cargo test", "/repo/wt"),
+            make_history_in(4, "cargo build", "/repo/wt"),
+        ];
+        assert_eq!(
+            ids_to_delete(&records, "cargo test", "/repo/wt"),
+            vec![1, 3]
+        );
+    }
+
+    #[test]
+    fn ids_to_delete_is_empty_when_command_exists_only_in_counterpart() {
+        let records = vec![make_history_in(2, "rake hocho:apply", "/repo/main")];
+        assert_eq!(
+            ids_to_delete(&records, "rake hocho:apply", "/repo/wt"),
+            Vec::<i32>::new()
+        );
+    }
+
+    #[test]
+    fn search_pwds_outside_worktree_is_just_pwd() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pwd = tmp.path().to_str().unwrap();
+        assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
     }
 
     // --- wrap_command tests ---
