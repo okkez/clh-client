@@ -198,8 +198,18 @@ fn normalize_pwd(pwd: &str) -> String {
 
 /// Delete all server records in `pwd` that share `command`.
 /// Used in pwd-scoped mode (^S) where all duplicates in the current directory should go.
-fn delete_by_command(cfg: &Config, command: &str, pwd: &str, records: &[History]) -> Result<()> {
-    let ids = ids_to_delete(records, command, pwd);
+fn delete_by_command(
+    cfg: &Config,
+    command: &str,
+    pwd: &str,
+    collected: &Mutex<Vec<History>>,
+) -> Result<()> {
+    // Pick the IDs under the lock, then release it before the HTTP calls.
+    let ids = ids_to_delete(
+        &collected.lock().expect("collected mutex poisoned"),
+        command,
+        pwd,
+    );
     if ids.is_empty() {
         eprintln!("clh: no record of this command in {pwd}; nothing deleted");
     }
@@ -314,10 +324,9 @@ fn delete_selected(
     pwds: &[String],
     collected: &Mutex<Vec<History>>,
 ) -> Result<()> {
-    let snapshot = collected.lock().expect("collected mutex poisoned").clone();
     if let Some(pwd) = pwds.first() {
         if let Some(command) = history_command(item) {
-            delete_by_command(cfg, &command, pwd, &snapshot)?;
+            delete_by_command(cfg, &command, pwd, collected)?;
         }
     } else if let Some(id) = history_id(item) {
         delete_by_id(cfg, id)?;
