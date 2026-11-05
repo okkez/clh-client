@@ -219,13 +219,6 @@ fn delete_by_command(
     Ok(())
 }
 
-/// Delete a single record by ID.
-/// Used in global mode (^T) to avoid accidentally deleting history from other directories.
-fn delete_by_id(cfg: &Config, id: i32) -> Result<()> {
-    client::delete_history(cfg, id)?;
-    Ok(())
-}
-
 /// Spawn a background thread that fetches history pages and streams `HistoryItem`s to `tx`.
 /// Fetched records are also accumulated in the returned `Arc<Mutex<Vec<History>>>` so the
 /// caller can take a snapshot at any time without waiting for the thread to finish.
@@ -329,7 +322,8 @@ fn delete_selected(
             delete_by_command(cfg, &command, pwd, collected)?;
         }
     } else if let Some(id) = history_id(item) {
-        delete_by_id(cfg, id)?;
+        // Only this record, to avoid deleting history used in other directories.
+        client::delete_history(cfg, id)?;
     }
     Ok(())
 }
