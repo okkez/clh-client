@@ -129,11 +129,11 @@ fn history_id(item: &Arc<dyn SkimItem>) -> Option<i32> {
         .map(|h| h.history.id)
 }
 
-fn history_command(item: &Arc<dyn SkimItem>) -> Option<String> {
+fn history_of(item: &Arc<dyn SkimItem>) -> Option<&History> {
     (**item)
         .as_any()
         .downcast_ref::<HistoryItem>()
-        .map(|h| h.history.command.clone())
+        .map(|h| &h.history)
 }
 
 /// Build skim options. Ctrl+D is always bound to accept.
@@ -196,12 +196,34 @@ fn normalize_pwd(pwd: &str) -> String {
         .map_or_else(|| pwd.to_string(), str::to_string)
 }
 
+/// A note for stderr after Ctrl+D in pwd mode, when the outcome may not match what
+/// the user expects; `None` when the selected entry itself was deleted.
+///
+/// - Nothing matched: deletion only sees records fetched so far, so a record in
+///   `pwd` may still be on a page that hasn't arrived yet.
+/// - In a git worktree the selected entry may come from the main worktree
+///   (`selected_dir`), which is kept, so the command stays in the list.
+fn deletion_note(deleted: usize, pwd: &str, selected_dir: Option<&str>) -> Option<String> {
+    if deleted == 0 {
+        return Some(format!(
+            "clh: no record of this command in {pwd} among the records fetched so far; nothing deleted"
+        ));
+    }
+    match selected_dir {
+        Some(dir) if dir != pwd => Some(format!(
+            "clh: deleted {deleted} record(s) in {pwd}; the entry from {dir} is kept"
+        )),
+        _ => None,
+    }
+}
+
 /// Delete all server records in `pwd` that share `command`.
 /// Used in pwd-scoped mode (^S) where all duplicates in the current directory should go.
 fn delete_by_command(
     cfg: &Config,
     command: &str,
     pwd: &str,
+    selected_dir: Option<&str>,
     collected: &Mutex<Vec<History>>,
 ) -> Result<()> {
     // Pick the IDs under the lock, then release it before the HTTP calls.
@@ -210,11 +232,11 @@ fn delete_by_command(
         command,
         pwd,
     );
-    if ids.is_empty() {
-        eprintln!("clh: no record of this command in {pwd}; nothing deleted");
-    }
-    for id in ids {
+    for &id in &ids {
         client::delete_history(cfg, id)?;
+    }
+    if let Some(note) = deletion_note(ids.len(), pwd, selected_dir) {
+        eprintln!("{note}");
     }
     Ok(())
 }
@@ -344,8 +366,9 @@ fn delete_selected(
     collected: &Mutex<Vec<History>>,
 ) -> Result<()> {
     if let Some(pwd) = pwds.first() {
-        if let Some(command) = history_command(item) {
-            delete_by_command(cfg, &command, pwd, collected)?;
+        if let Some(selected) = history_of(item) {
+            let selected_dir = selected.working_directory.as_deref();
+            delete_by_command(cfg, &selected.command, pwd, selected_dir, collected)?;
         }
     } else if let Some(id) = history_id(item) {
         // Only this record, to avoid deleting history used in other directories.
@@ -415,7 +438,7 @@ mod tests {
     fn commands(records: &[History]) -> Vec<String> {
         make_deduped_items(records)
             .iter()
-            .filter_map(history_command)
+            .filter_map(|i| history_of(i).map(|h| h.command.clone()))
             .collect()
     }
 
@@ -434,7 +457,7 @@ mod tests {
         let items = make_deduped_items(&records);
         let git_item = items
             .iter()
-            .find(|i| history_command(i).as_deref() == Some("git status"))
+            .find(|i| history_of(i).is_some_and(|h| h.command == "git status"))
             .unwrap();
         // Should keep id=2 (the first record in the slice = most recently used)
         let hist = (**git_item).as_any().downcast_ref::<HistoryItem>().unwrap();
@@ -535,6 +558,23 @@ mod tests {
             ids_to_delete(&records, "rake hocho:apply", "/repo/wt"),
             Vec::<i32>::new()
         );
+    }
+
+    #[test]
+    fn deletion_note_says_records_may_be_unfetched_when_nothing_matched() {
+        let note = deletion_note(0, "/repo/wt", Some("/repo/main")).unwrap();
+        assert!(note.contains("fetched so far"), "{note}");
+    }
+
+    #[test]
+    fn deletion_note_explains_entry_kept_from_main_worktree() {
+        let note = deletion_note(2, "/repo/wt", Some("/repo/main")).unwrap();
+        assert!(note.contains("/repo/main"), "{note}");
+    }
+
+    #[test]
+    fn deletion_note_is_silent_when_selected_entry_was_deleted() {
+        assert_eq!(deletion_note(1, "/repo/wt", Some("/repo/wt")), None);
     }
 
     #[test]
