@@ -165,8 +165,13 @@ fn ids_to_delete(records: &[History], command: &str, pwd: &str) -> Vec<i32> {
 /// position in the main working tree when `pwd` is inside a linked git worktree.
 fn search_pwds(pwd: &str) -> Vec<String> {
     let mut pwds = vec![pwd.to_string()];
-    if let Some(dir) = worktree::counterpart_dir(Path::new(pwd)) {
-        pwds.push(dir.to_string_lossy().into_owned());
+    // A non-UTF-8 path can't match any stored record, so skip it rather than
+    // sending a lossily converted one.
+    if let Some(dir) = worktree::counterpart_dir(Path::new(pwd))
+        .as_deref()
+        .and_then(Path::to_str)
+    {
+        pwds.push(dir.to_string());
     }
     pwds
 }
@@ -445,6 +450,21 @@ mod tests {
     fn search_pwds_outside_worktree_is_just_pwd() {
         let tmp = tempfile::TempDir::new().unwrap();
         let pwd = tmp.path().to_str().unwrap();
+        assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
+    }
+
+    #[test]
+    fn search_pwds_skips_non_utf8_counterpart() {
+        use std::os::unix::ffi::OsStrExt;
+
+        // A lossily converted path would never match a stored record, so don't send it.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let main = base.join(std::ffi::OsStr::from_bytes(b"main-\xff"));
+        let wt = base.join("wt");
+        crate::worktree::test_support::create_main_and_worktree(&main, &wt);
+
+        let pwd = wt.to_str().unwrap();
         assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
     }
 
