@@ -166,11 +166,11 @@ fn ids_to_delete(records: &[History], command: &str, pwd: &str) -> Vec<i32> {
 ///
 /// `pwd` is normalized like the shell's `$PWD` (absolute, no trailing slash, no `.`
 /// components) because both the server filter and Ctrl+D compare paths exactly.
-fn search_pwds(pwd: &str) -> Vec<String> {
+fn pwds_to_search(pwd: &str) -> Vec<String> {
     let pwd = normalize_pwd(pwd);
     // A non-UTF-8 path can't match any stored record, so skip it rather than
     // sending a lossily converted one.
-    let counterpart = worktree::counterpart_dir(Path::new(&pwd))
+    let counterpart = worktree::main_worktree_counterpart(Path::new(&pwd))
         .as_deref()
         .and_then(Path::to_str)
         .map(str::to_string);
@@ -319,7 +319,7 @@ fn is_ctrl_d(key: KeyEvent) -> bool {
 }
 
 fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
-    let pwds = pwd.map(search_pwds).unwrap_or_default();
+    let pwds = pwd.map(pwds_to_search).unwrap_or_default();
     let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
     let stream = spawn_stream_thread(cfg.clone(), pwds.clone(), tx);
 
@@ -354,7 +354,7 @@ fn run_search_inner(cfg: &Config, pwd: Option<&str>) -> Result<()> {
 
 /// Handle Ctrl+D on `item`.
 ///
-/// `pwds` is the search scope from [`search_pwds`]: empty for global mode (^T), where
+/// `pwds` is the search scope from [`pwds_to_search`]: empty for global mode (^T), where
 /// only the selected record is deleted; otherwise `pwds[0]` is the current directory
 /// (^S), and every record of the selected command recorded there is deleted.
 /// Deletion works on a snapshot of whatever has been fetched so far (speed over
@@ -578,14 +578,14 @@ mod tests {
     }
 
     #[test]
-    fn search_pwds_outside_worktree_is_just_pwd() {
+    fn pwds_to_search_outside_worktree_is_just_pwd() {
         let tmp = tempfile::TempDir::new().unwrap();
         let pwd = tmp.path().to_str().unwrap();
-        assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
+        assert_eq!(pwds_to_search(pwd), vec![pwd.to_string()]);
     }
 
     #[test]
-    fn search_pwds_normalizes_trailing_slash_and_dot_components() {
+    fn pwds_to_search_normalizes_trailing_slash_and_dot_components() {
         // Stored records use `$PWD` (no trailing slash, no `.`), and the query and
         // Ctrl+D both compare exactly, so `--pwd` must be normalized the same way.
         let tmp = tempfile::TempDir::new().unwrap();
@@ -594,12 +594,15 @@ mod tests {
         std::fs::create_dir(&sub).unwrap();
         let sub = sub.to_str().unwrap();
 
-        assert_eq!(search_pwds(&format!("{pwd}/")), vec![pwd.to_string()]);
-        assert_eq!(search_pwds(&format!("{pwd}/./sub")), vec![sub.to_string()]);
+        assert_eq!(pwds_to_search(&format!("{pwd}/")), vec![pwd.to_string()]);
+        assert_eq!(
+            pwds_to_search(&format!("{pwd}/./sub")),
+            vec![sub.to_string()]
+        );
     }
 
     #[test]
-    fn search_pwds_skips_non_utf8_counterpart() {
+    fn pwds_to_search_skips_non_utf8_counterpart() {
         use std::os::unix::ffi::OsStrExt;
 
         // A lossily converted path would never match a stored record, so don't send it.
@@ -610,15 +613,15 @@ mod tests {
         crate::worktree::test_support::create_main_and_worktree(&main, &wt);
 
         let pwd = wt.to_str().unwrap();
-        assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
+        assert_eq!(pwds_to_search(pwd), vec![pwd.to_string()]);
     }
 
     #[test]
-    fn search_pwds_in_worktree_lists_pwd_then_main_counterpart() {
+    fn pwds_to_search_in_worktree_lists_pwd_then_main_counterpart() {
         let (_tmp, main, wt) = crate::worktree::test_support::setup_main_and_worktree();
         let pwd = wt.to_str().unwrap();
         assert_eq!(
-            search_pwds(pwd),
+            pwds_to_search(pwd),
             vec![pwd.to_string(), main.to_str().unwrap().to_string()]
         );
     }

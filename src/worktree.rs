@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 ///
 /// History is recorded with the shell's logical `$PWD`, so when `pwd` goes through a
 /// symlink the result goes through the same symlink (see [`to_logical`]).
-pub fn counterpart_dir(logical_pwd: &Path) -> Option<PathBuf> {
+pub fn main_worktree_counterpart(logical_pwd: &Path) -> Option<PathBuf> {
     // Work with the physical path like git does; map back to logical at the end.
     let pwd = logical_pwd.canonicalize().ok()?;
     let (toplevel, dot_git) = pwd
@@ -28,10 +28,10 @@ pub fn counterpart_dir(logical_pwd: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    let content = fs::read_to_string(&dot_git).ok()?;
-    let git_dir = toplevel.join(content.strip_prefix("gitdir:")?.trim());
-    let common_dir = fs::read_to_string(git_dir.join("commondir")).ok()?;
-    let common_dir = git_dir.join(common_dir.trim()).canonicalize().ok()?;
+    let dot_git_content = fs::read_to_string(&dot_git).ok()?;
+    let git_dir = toplevel.join(dot_git_content.strip_prefix("gitdir:")?.trim());
+    let commondir_content = fs::read_to_string(git_dir.join("commondir")).ok()?;
+    let common_dir = git_dir.join(commondir_content.trim()).canonicalize().ok()?;
     if common_dir.file_name()? != ".git" || is_bare(&common_dir) {
         return None;
     }
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn worktree_root_maps_to_main_root() {
         let (_tmp, main, wt) = setup_main_and_worktree();
-        assert_eq!(counterpart_dir(&wt), Some(main));
+        assert_eq!(main_worktree_counterpart(&wt), Some(main));
     }
 
     #[test]
@@ -176,7 +176,10 @@ mod tests {
         let (_tmp, main, wt) = setup_main_and_worktree();
         let sub = wt.join("src").join("foo");
         fs::create_dir_all(&sub).unwrap();
-        assert_eq!(counterpart_dir(&sub), Some(main.join("src").join("foo")));
+        assert_eq!(
+            main_worktree_counterpart(&sub),
+            Some(main.join("src").join("foo"))
+        );
     }
 
     #[test]
@@ -191,7 +194,7 @@ mod tests {
         fs::create_dir(&sub).unwrap();
 
         assert_eq!(
-            counterpart_dir(&link.join("wt").join("src")),
+            main_worktree_counterpart(&link.join("wt").join("src")),
             Some(link.join("main").join("src"))
         );
     }
@@ -199,7 +202,7 @@ mod tests {
     #[test]
     fn main_working_tree_has_no_counterpart() {
         let (_tmp, main, _wt) = setup_main_and_worktree();
-        assert_eq!(counterpart_dir(&main), None);
+        assert_eq!(main_worktree_counterpart(&main), None);
     }
 
     #[test]
@@ -221,13 +224,16 @@ mod tests {
                 "vendor/lib",
             ],
         );
-        assert_eq!(counterpart_dir(&main.join("vendor").join("lib")), None);
+        assert_eq!(
+            main_worktree_counterpart(&main.join("vendor").join("lib")),
+            None
+        );
     }
 
     #[test]
     fn non_git_directory_has_no_counterpart() {
         let tmp = TempDir::new().unwrap();
-        assert_eq!(counterpart_dir(tmp.path()), None);
+        assert_eq!(main_worktree_counterpart(tmp.path()), None);
     }
 
     #[test]
@@ -261,7 +267,7 @@ mod tests {
                 wt.to_str().unwrap(),
             ],
         );
-        assert_eq!(counterpart_dir(&wt), None);
+        assert_eq!(main_worktree_counterpart(&wt), None);
     }
 
     #[test]
@@ -297,6 +303,6 @@ mod tests {
                 wt.to_str().unwrap(),
             ],
         );
-        assert_eq!(counterpart_dir(&wt), None);
+        assert_eq!(main_worktree_counterpart(&wt), None);
     }
 }
