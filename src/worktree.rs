@@ -14,9 +14,12 @@ use std::path::{Path, PathBuf};
 /// bare repository (`core.bare = true`, or common dir not named `.git`), or a non-git
 /// directory.
 /// Setups driven by `GIT_DIR` / `core.worktree` are not detected.
-pub fn counterpart_dir(pwd: &Path) -> Option<PathBuf> {
-    // `$PWD` may go through symlinks; work with the physical path like git does.
-    let pwd = pwd.canonicalize().ok()?;
+///
+/// History is recorded with the shell's logical `$PWD`, so when `pwd` goes through a
+/// symlink the result goes through the same symlink (see [`to_logical`]).
+pub fn counterpart_dir(logical_pwd: &Path) -> Option<PathBuf> {
+    // Work with the physical path like git does; map back to logical at the end.
+    let pwd = logical_pwd.canonicalize().ok()?;
     let (toplevel, dot_git) = pwd
         .ancestors()
         .map(|dir| (dir, dir.join(".git")))
@@ -35,7 +38,36 @@ pub fn counterpart_dir(pwd: &Path) -> Option<PathBuf> {
 
     let main_root = common_dir.parent()?;
     let relative = pwd.strip_prefix(toplevel).ok()?;
-    Some(main_root.join(relative))
+    Some(to_logical(&main_root.join(relative), logical_pwd, &pwd))
+}
+
+/// Rewrite the physical `path` so it goes through the same symlinked prefix as
+/// `logical_pwd`.
+///
+/// The trailing components shared by `logical_pwd` and its physical form `physical_pwd`
+/// are dropped; what remains is the symlinked prefix (logical) and its target
+/// (physical). If `path` lives under that target, the prefix is swapped back.
+/// Otherwise (or when `logical_pwd` is relative) `path` is returned unchanged.
+fn to_logical(path: &Path, logical_pwd: &Path, physical_pwd: &Path) -> PathBuf {
+    if !logical_pwd.is_absolute() {
+        return path.to_path_buf();
+    }
+    let mut logical_prefix = logical_pwd;
+    let mut physical_prefix = physical_pwd;
+    while let (Some(l), Some(p)) = (logical_prefix.file_name(), physical_prefix.file_name()) {
+        if l != p {
+            break;
+        }
+        match (logical_prefix.parent(), physical_prefix.parent()) {
+            (Some(lp), Some(pp)) => {
+                logical_prefix = lp;
+                physical_prefix = pp;
+            }
+            _ => break,
+        }
+    }
+    path.strip_prefix(physical_prefix)
+        .map_or_else(|_| path.to_path_buf(), |rest| logical_prefix.join(rest))
 }
 
 /// Whether `<git_dir>/config` sets `core.bare` to true.
@@ -131,6 +163,23 @@ mod tests {
         let sub = wt.join("src").join("foo");
         fs::create_dir_all(&sub).unwrap();
         assert_eq!(counterpart_dir(&sub), Some(main.join("src").join("foo")));
+    }
+
+    #[test]
+    fn symlinked_pwd_maps_to_main_through_the_same_symlink() {
+        // History is recorded with the shell's logical `$PWD`, so the counterpart
+        // must go through the same symlink rather than the physical path.
+        let (tmp, main, wt) = setup_main_and_worktree();
+        let base = main.parent().unwrap();
+        let link = tmp.path().canonicalize().unwrap().join("link");
+        std::os::unix::fs::symlink(base, &link).unwrap();
+        let sub = wt.join("src");
+        fs::create_dir(&sub).unwrap();
+
+        assert_eq!(
+            counterpart_dir(&link.join("wt").join("src")),
+            Some(link.join("main").join("src"))
+        );
     }
 
     #[test]
