@@ -448,6 +448,16 @@ mod tests {
         assert_eq!(search_pwds(pwd), vec![pwd.to_string()]);
     }
 
+    #[test]
+    fn search_pwds_in_worktree_lists_pwd_then_main_counterpart() {
+        let (_tmp, main, wt) = crate::worktree::test_support::setup_main_and_worktree();
+        let pwd = wt.to_str().unwrap();
+        assert_eq!(
+            search_pwds(pwd),
+            vec![pwd.to_string(), main.to_str().unwrap().to_string()]
+        );
+    }
+
     // --- wrap_command tests ---
 
     #[test]

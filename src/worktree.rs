@@ -96,15 +96,18 @@ fn is_bare(git_dir: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod test_support {
+    use std::ffi::OsStr;
+    use std::fmt::Debug;
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use tempfile::TempDir;
 
     /// Run `git` isolated from the developer's environment: ignore global/system
     /// config (e.g. `commit.gpgsign`, `core.hooksPath`) and any inherited `GIT_*`
     /// variables (e.g. `GIT_DIR` when tests run from a git hook).
-    fn git(dir: &Path, args: &[&str]) {
+    pub fn git<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S]) {
         let mut cmd = Command::new("git");
         for (key, _) in std::env::vars_os() {
             if key.to_string_lossy().starts_with("GIT_") {
@@ -127,29 +130,40 @@ mod tests {
         );
     }
 
+    /// Create a repository at `main` (with one commit) and a linked worktree at `wt`.
+    pub fn create_main_and_worktree(main: &Path, wt: &Path) {
+        fs::create_dir(main).unwrap();
+        git(main, &["init", "-q"]);
+        git(main, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        // `wt` may not be valid UTF-8, so pass it as an `OsStr`.
+        let args: [&OsStr; 6] = [
+            "worktree".as_ref(),
+            "add".as_ref(),
+            "-q".as_ref(),
+            "-b".as_ref(),
+            "feature".as_ref(),
+            wt.as_os_str(),
+        ];
+        git(main, &args);
+    }
+
     /// Create `<tmp>/main` (with one commit) and a linked worktree at `<tmp>/wt`.
     /// Paths are canonicalized so comparisons work where the temp dir is a symlink.
-    fn setup_main_and_worktree() -> (TempDir, PathBuf, PathBuf) {
+    pub fn setup_main_and_worktree() -> (TempDir, PathBuf, PathBuf) {
         let tmp = TempDir::new().unwrap();
         let base = tmp.path().canonicalize().unwrap();
         let main = base.join("main");
-        fs::create_dir(&main).unwrap();
-        git(&main, &["init", "-q"]);
-        git(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
         let wt = base.join("wt");
-        git(
-            &main,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                "-b",
-                "feature",
-                wt.to_str().unwrap(),
-            ],
-        );
+        create_main_and_worktree(&main, &wt);
         (tmp, main, wt)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{git, setup_main_and_worktree};
+    use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn worktree_root_maps_to_main_root() {
