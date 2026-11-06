@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/okkez/clh-client/compare/v0.1.5...v0.1.6) - 2026-11-06
+
+### Added
+
+- include main worktree history in pwd search from linked git worktrees
+
+### Fixed
+
+- make the Ctrl+D note match what was actually deleted
+- report history fetch errors instead of showing an empty list
+- normalize --pwd before using it as an exact-match key
+- skip a non-UTF-8 main worktree path instead of converting it lossily
+- map the main worktree path through the same symlink as $PWD
+- don't treat a bare repository named .git as a main working tree
+
+### Other
+
+- rename worktree helpers to say what they return
+- inline delete_by_id into delete_selected
+- stop cloning fetched records on every Ctrl+D
+- derive the Ctrl+D target dir from the search scope
+- cover search_pwds inside a linked worktree
+- isolate worktree test git calls from the developer environment
+- *(deps)* update taiki-e/install-action action to v2.90.1
+
 ## [0.1.5](https://github.com/okkez/clh-client/compare/v0.1.4...v0.1.5) - 2026-11-02
 
 ### Fixed
