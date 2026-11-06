@@ -9,8 +9,9 @@ use crate::models::History;
 /// Calls `on_page` with each page of results as they are fetched.
 /// If `on_page` returns an error, fetching stops and the error is returned.
 ///
-/// `pwd` optionally filters results to a specific working directory.
-pub fn for_each_page<F>(cfg: &Config, pwd: Option<&str>, mut on_page: F) -> Result<()>
+/// `pwds` filters results to records whose working directory is any of the given
+/// paths (sent as repeated `pwd` query keys). An empty slice means no filter.
+pub fn for_each_page<F>(cfg: &Config, pwds: &[String], mut on_page: F) -> Result<()>
 where
     F: FnMut(Vec<History>) -> Result<()>,
 {
@@ -18,13 +19,13 @@ where
     let base_url = cfg.server.url.trim_end_matches('/');
     let page_size = cfg.search.page_size;
 
-    let (first_page, total) = fetch_page(&client, base_url, cfg, pwd, 0, page_size)?;
+    let (first_page, total) = fetch_page(&client, base_url, cfg, pwds, 0, page_size)?;
     on_page(first_page)?;
 
     if let Some(total) = total {
         let mut offset = page_size;
         while offset < total {
-            let (page, _) = fetch_page(&client, base_url, cfg, pwd, offset, page_size)?;
+            let (page, _) = fetch_page(&client, base_url, cfg, pwds, offset, page_size)?;
             on_page(page)?;
             offset += page_size;
         }
@@ -38,9 +39,9 @@ where
 /// Convenience wrapper around [`for_each_page`]. Used in tests and as a utility
 /// for callers that need the full record list before processing.
 #[allow(dead_code)]
-pub fn fetch_all(cfg: &Config, pwd: Option<&str>) -> Result<Vec<History>> {
+pub fn fetch_all(cfg: &Config, pwds: &[String]) -> Result<Vec<History>> {
     let mut all = Vec::new();
-    for_each_page(cfg, pwd, |page| {
+    for_each_page(cfg, pwds, |page| {
         all.extend(page);
         Ok(())
     })?;
@@ -82,7 +83,7 @@ fn fetch_page(
     client: &Client,
     base_url: &str,
     cfg: &Config,
-    pwd: Option<&str>,
+    pwds: &[String],
     offset: usize,
     limit: usize,
 ) -> Result<(Vec<History>, Option<usize>)> {
@@ -94,7 +95,7 @@ fn fetch_page(
         req = req.query(&[("hostname", hostname)]);
     }
 
-    if let Some(pwd) = pwd {
+    for pwd in pwds {
         req = req.query(&[("pwd", pwd)]);
     }
 
@@ -186,7 +187,7 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let records = fetch_all(&cfg, None).unwrap();
+        let records = fetch_all(&cfg, &[]).unwrap();
 
         mock.assert();
         drop(server);
@@ -231,13 +232,39 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let records = fetch_all(&cfg, None).unwrap();
+        let records = fetch_all(&cfg, &[]).unwrap();
 
         mock1.assert();
         mock2.assert();
         drop(server);
         assert_eq!(records.len(), 3);
         assert_eq!(records[2].command, "echo c");
+    }
+
+    #[test]
+    fn fetch_all_sends_each_pwd_as_repeated_query_key() {
+        let mut server = Server::new();
+        let body =
+            serde_json::to_string(&serde_json::json!([history_json(1, "cargo test")])).unwrap();
+
+        let mock = server
+            .mock("GET", "/")
+            // Matcher::UrlEncoded can't express repeated keys, so match the raw query.
+            .match_query(mockito::Matcher::Regex(
+                "pwd=%2Frepo%2Fwt&pwd=%2Frepo%2Fmain".into(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&body)
+            .create();
+
+        let cfg = make_config(&server.url());
+        let pwds = vec!["/repo/wt".to_string(), "/repo/main".to_string()];
+        let records = fetch_all(&cfg, &pwds).unwrap();
+
+        mock.assert();
+        drop(server);
+        assert_eq!(records.len(), 1);
     }
 
     #[test]
@@ -251,7 +278,7 @@ mod tests {
             .create();
 
         let cfg = make_config(&server.url());
-        let result = fetch_all(&cfg, None);
+        let result = fetch_all(&cfg, &[]);
 
         mock.assert();
         drop(server);
