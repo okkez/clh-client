@@ -32,7 +32,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Install cross-compilation tools
-        uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1.42.0
+        uses: taiki-e/setup-cross-toolchain-action@0375eb1d01bea430aa3202965839a7092960a23b # v1.43.1
         with:
           target: ${{ matrix.target }}
           runner: none
